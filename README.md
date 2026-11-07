@@ -24,10 +24,10 @@ GitHub Actions 中的 **Publish signed Android update** 工作流可在 `main` �
 首次从原打包电脑迁移密钥时，在 GitHub CLI 中运行 `gh auth login --web`，然后在项目根目录的 PowerShell 执行：
 
 ```powershell
-powershell -NoProfile -File .\scripts\upload-signing-key.ps1 -KeystorePath '原签名文件的完整路径'
+powershell -NoProfile -File .\scripts\upload-signing-key.ps1
 ```
 
-脚本通过 GitHub CLI 将以下值加密后上传至仓库 Actions Secrets，不将密钥提交到仓库，也不将密码放在命令参数或输出中：
+脚本自动查找 `.android-tools` 下唯一的 `debug.keystore`。若有多个文件或文件在其他位置，用 `-KeystorePath '原签名文件的完整路径'` 指定。脚本通过 GitHub CLI 将以下值加密后上传至仓库 Actions Secrets，不将密钥提交到仓库，也不将密码放在命令参数或输出中：
 
 - `ANDROID_KEYSTORE_BASE64`：原签名文件的 Base64 内容。
 - `ANDROID_KEYSTORE_PASSWORD`：密钥库密码。

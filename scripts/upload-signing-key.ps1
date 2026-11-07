@@ -1,8 +1,13 @@
 param(
-    [Parameter(Mandatory = $true)][string]$KeystorePath,
+    [string]$KeystorePath,
     [string]$Repository = 'YHWXAI/wechat-todo-assistant'
 )
 $ErrorActionPreference = 'Stop'
+if (-not $KeystorePath) {
+    $candidates = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot '..\.android-tools') -Filter debug.keystore -File -Recurse)
+    if ($candidates.Count -ne 1) { throw 'Pass -KeystorePath with the original signing file path.' }
+    $KeystorePath = $candidates[0].FullName
+}
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw 'Install GitHub CLI first: winget install --id GitHub.cli --exact'
 }
