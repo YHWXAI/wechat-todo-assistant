@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.tencent.mm">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="35" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application android:label="WeChat test fixture">
+        <activity android:name=".FixtureActivity" android:exported="true" />
+    </application>
+</manifest>
