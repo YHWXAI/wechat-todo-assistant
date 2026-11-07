@@ -5,7 +5,6 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -21,7 +20,6 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Locale;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -29,12 +27,10 @@ import javax.net.ssl.HttpsURLConnection;
 
 final class GitHubUpdates {
     private static final String ASSET = "WeChatTodo-debug.apk";
-    private static final int MAX_RELEASE_BYTES = 1024 * 1024;
-    private static final int MAX_APK_BYTES = 64 * MAX_RELEASE_BYTES;
+    private static final int MAX_MANIFEST_BYTES = 4096;
+    private static final int MAX_APK_BYTES = 64 * 1024 * 1024;
     private static final Pattern VERSION = Pattern.compile("v?(\\d{1,6})\\.(\\d{1,6})(?:\\.(\\d{1,6}))?");
     private static final Pattern DIGEST = Pattern.compile("sha256:[0-9a-f]{64}");
-    private static final Set<String> DOWNLOAD_HOSTS = Set.of(
-            "release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com");
 
     private GitHubUpdates() {}
 
@@ -47,15 +43,15 @@ final class GitHubUpdates {
     record Release(String version, long size, String digest) {}
 
     static Release latest(String repo) throws IOException, JSONException {
-        HttpsURLConnection connection = api(repo, "/releases/latest", "application/vnd.github+json");
+        HttpsURLConnection connection = open(channelFile(repo, "updates.json"));
         try {
-            requireSuccess(connection.getResponseCode());
+            requireSuccess(connection.getResponseCode(), "读取版本信息");
             byte[] json;
             try (InputStream input = connection.getInputStream()) {
-                json = input.readNBytes(MAX_RELEASE_BYTES + 1);
+                json = input.readNBytes(MAX_MANIFEST_BYTES + 1);
             }
-            if (json.length > MAX_RELEASE_BYTES) {
-                throw new UpdateFailure("发布信息过大。");
+            if (json.length > MAX_MANIFEST_BYTES) {
+                throw new UpdateFailure("版本信息超过大小限制。");
             }
             return parseRelease(new JSONObject(new String(json, StandardCharsets.UTF_8)), BuildConfig.VERSION_NAME);
         } finally {
@@ -64,23 +60,19 @@ final class GitHubUpdates {
     }
 
     static Release parseRelease(JSONObject json, String installed) throws JSONException, IOException {
-        String tag = json.getString("tag_name");
+        String tag = json.getString("version");
+        if (!tag.startsWith("v")) {
+            throw new UpdateFailure("版本信息缺少版本标签。");
+        }
         if (compareVersions(tag, installed) <= 0) {
             return null;
         }
-        JSONArray assets = json.getJSONArray("assets");
-        for (int i = 0; i < assets.length(); i++) {
-            JSONObject asset = assets.getJSONObject(i);
-            if (ASSET.equals(asset.optString("name")) && "uploaded".equals(asset.optString("state"))) {
-                long size = asset.getLong("size");
-                String digest = asset.optString("digest", "");
-                if (size > 0 && size <= MAX_APK_BYTES && DIGEST.matcher(digest).matches()) {
-                    return new Release(tag, size, digest);
-                }
-                throw new UpdateFailure("发布的 APK 缺少有效的大小或 SHA-256 校验值。");
-            }
+        long size = json.getLong("size");
+        String digest = json.getString("digest");
+        if (size <= 0 || size > MAX_APK_BYTES || !DIGEST.matcher(digest).matches()) {
+            throw new UpdateFailure("发布的 APK 缺少有效的大小或 SHA-256 校验值。");
         }
-        throw new UpdateFailure("新版未附带 " + ASSET + "。");
+        return new Release(tag, size, digest);
     }
 
     static void download(Context context, String repo, Release release)
@@ -102,17 +94,9 @@ final class GitHubUpdates {
 
     private static void copyAsset(String repo, Release release, File temp)
             throws IOException, GeneralSecurityException {
-        HttpsURLConnection connection = open(URI.create(
-                "https://github.com/" + repo + "/releases/download/" + release.version() + "/" + ASSET));
+        HttpsURLConnection connection = open(channelFile(repo, release.version() + "/" + ASSET));
         try {
-            int code = connection.getResponseCode();
-            if (code == HttpsURLConnection.HTTP_MOVED_TEMP) {
-                String location = connection.getHeaderField("Location");
-                connection.disconnect();
-                connection = downloadConnection(location);
-                code = connection.getResponseCode();
-            }
-            requireSuccess(code);
+            requireSuccess(connection.getResponseCode(), "下载安装包");
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             long length = 0;
             try (InputStream input = connection.getInputStream(); FileOutputStream output = new FileOutputStream(temp)) {
@@ -157,26 +141,12 @@ final class GitHubUpdates {
         return installedSigners.length == 1 && Arrays.equals(installedSigners, newSigners) ? apk : null;
     }
 
-    private static HttpsURLConnection api(String repo, String endpoint, String accept) throws IOException {
-        HttpsURLConnection connection = open(URI.create("https://api.github.com/repos/" + repo + endpoint));
-        connection.setRequestProperty("Accept", accept);
-        connection.setRequestProperty("X-GitHub-Api-Version", "2022-11-28");
-        return connection;
+    static URI manualDownload(String repo) {
+        return channelFile(repo, ASSET);
     }
 
-    private static HttpsURLConnection downloadConnection(String location) throws IOException {
-        URI uri;
-        try {
-            uri = location == null ? null : URI.create(location);
-        } catch (IllegalArgumentException invalid) {
-            throw new UpdateFailure("GitHub 返回了无效的下载地址。");
-        }
-        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null
-                || !DOWNLOAD_HOSTS.contains(uri.getHost()) || uri.getUserInfo() != null
-                || (uri.getPort() != -1 && uri.getPort() != 443)) {
-            throw new UpdateFailure("GitHub 返回了无法验证的下载地址。");
-        }
-        return open(uri);
+    private static URI channelFile(String repo, String path) {
+        return URI.create("https://raw.githubusercontent.com/" + repo + "/updates/" + path);
     }
 
     private static HttpsURLConnection open(URI uri) throws IOException {
@@ -189,15 +159,11 @@ final class GitHubUpdates {
         return connection;
     }
 
-    private static void requireSuccess(int status) throws IOException {
+    private static void requireSuccess(int status, String step) throws IOException {
         if (status == 200) {
             return;
         }
-        throw new UpdateFailure(switch (status) {
-            case 404 -> "更新仓库还没有可用的正式发布。";
-            case 403, 429 -> "GitHub 暂时拒绝了请求，请稍后再试。";
-            default -> "GitHub 更新请求失败（HTTP " + status + "）。";
-        });
+        throw new UpdateFailure(step + "失败（HTTP " + status + "）。可尝试用浏览器下载。");
     }
 
     private static int compareVersions(String first, String second) throws IOException {

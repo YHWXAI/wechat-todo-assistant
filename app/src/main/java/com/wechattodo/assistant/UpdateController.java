@@ -45,6 +45,15 @@ final class UpdateController {
         }
     }
 
+    void openDownloadPage() {
+        try {
+            Uri download = Uri.parse(GitHubUpdates.manualDownload(BuildConfig.UPDATE_REPOSITORY).toString());
+            activity.startActivity(new Intent(Intent.ACTION_VIEW, download));
+        } catch (ActivityNotFoundException unavailable) {
+            toast("找不到可打开下载链接的浏览器。");
+        }
+    }
+
     private void check() {
         String repository = BuildConfig.UPDATE_REPOSITORY;
         setBusy(true);
@@ -66,7 +75,7 @@ final class UpdateController {
             } catch (GitHubUpdates.UpdateFailure failure) {
                 finish(failure.getMessage(), false);
             } catch (IOException | JSONException | GeneralSecurityException | PackageManager.NameNotFoundException failure) {
-                finish("无法完成更新。请检查手机是否能访问 GitHub，再试一次。", false);
+                finish("无法连接更新地址。请检查网络，或尝试用浏览器下载。", false);
             }
         }, "github-update").start();
     }

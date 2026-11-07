@@ -117,6 +117,7 @@ public final class MainActivity extends Activity {
         add(updater, check, 4);
         add(updater, install, 0);
         updates = new UpdateController(this, updateStatus, check, install);
+        add(updater, button("用浏览器下载", view -> updates.openDownloadPage()), 0);
     }
 
     @Override
