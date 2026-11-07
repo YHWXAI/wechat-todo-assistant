@@ -30,7 +30,6 @@ import android.widget.Toast;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -57,6 +56,7 @@ public final class MainActivity extends Activity {
     private LinearLayout taskList;
     private TextView chatReaderStatus;
     private Button chatReaderButton;
+    private Button chatReaderSettings;
     private UpdateController updates;
 
     @Override
@@ -94,11 +94,13 @@ public final class MainActivity extends Activity {
 
         LinearLayout reader = card();
         add(page, reader, 12);
-        add(reader, label("读取当前微信聊天", 17, INK, true), 0);
+        add(reader, label("自动识别微信聊天", 17, INK, true), 0);
         chatReaderStatus = label("", 14, SUBTLE, false);
         add(reader, chatReaderStatus, 6);
-        chatReaderButton = button("准备读取", v -> startChatRead());
+        chatReaderButton = button("开启自动识别", v -> toggleChatRead());
         add(reader, chatReaderButton, 4);
+        chatReaderSettings = button("打开无障碍设置", v -> openAccessibilitySettings());
+        add(reader, chatReaderSettings, 0);
 
         count = label("", 20, INK, true);
         add(page, count, 20);
@@ -133,10 +135,6 @@ public final class MainActivity extends Activity {
         showTasks();
         Reminders.scheduleNext(this);
         updates.onResume();
-        WeChatChatReader.Preview preview = WeChatChatReader.takePreview();
-        if (preview != null) {
-            showChatPreview(preview);
-        }
     }
 
     @Override
@@ -162,10 +160,16 @@ public final class MainActivity extends Activity {
                 getString(reminders ? R.string.enabled : R.string.disabled)));
         listenerButton.setVisibility(listener ? View.GONE : View.VISIBLE);
         remindersButton.setVisibility(reminders ? View.GONE : View.VISIBLE);
-        boolean reader = WeChatChatReader.isReady();
-        chatReaderStatus.setText(reader ? "已授权。准备后切到微信聊天，再点「读取当前聊天」。"
-                : "你可以授权无障碍读取，在微信打开聊天后主动提取待办。");
-        chatReaderButton.setText(reader ? "准备读取" : "开启聊天界面读取");
+        showChatReaderStatus();
+    }
+
+    private void showChatReaderStatus() {
+        boolean enabled = WeChatChatReader.isEnabled(this);
+        boolean authorized = WeChatChatReader.hasAccess(this);
+        chatReaderStatus.setText(!enabled ? R.string.auto_read_off
+                : authorized ? R.string.auto_read_on : R.string.auto_read_waiting);
+        chatReaderButton.setText(enabled ? R.string.auto_read_stop : R.string.auto_read_start);
+        chatReaderSettings.setVisibility(enabled && !authorized ? View.VISIBLE : View.GONE);
     }
 
     private boolean hasListenerAccess() {
@@ -200,76 +204,29 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void startChatRead() {
-        if (WeChatChatReader.armReader()) {
-            Toast.makeText(this, "请在 90 秒内切到微信聊天，点右上方的「读取当前聊天」。",
-                    Toast.LENGTH_LONG).show();
+    private void toggleChatRead() {
+        if (WeChatChatReader.isEnabled(this)) {
+            WeChatChatReader.setEnabled(this, false);
+            showChatReaderStatus();
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("授权读取当前微信聊天")
-                .setMessage("安卓无障碍权限允许应用查看界面。本助手只在你先点「准备读取」、再在微信点「读取当前聊天」后查看当前可见聊天。"
-                        + "候选内容由你勾选，保存的待办留在手机上。你随时可以在系统设置里关闭权限。")
+                .setTitle(R.string.auto_read_start)
+                .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息，并在手机上保存匹配的待办。"
+                        + "你可以随时在这里关闭自动识别。")
                 .setNegativeButton("取消", null)
-                .setPositiveButton("打开无障碍设置", (dialog, which) -> openSettings(
-                        new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
-                .show();
-    }
-
-    private void showChatPreview(WeChatChatReader.Preview preview) {
-        List<Long> deadlines = new ArrayList<>();
-        String[] entries = new String[preview.messages().size()];
-        for (int i = 0; i < entries.length; i++) {
-            String message = preview.messages().get(i);
-            Long due = TaskRules.dueAt(message, preview.scannedAt());
-            deadlines.add(due);
-            entries[i] = message + (due == null ? "" : "\n截止 " + formatDue(due));
-        }
-        boolean[] selected = new boolean[entries.length];
-        LinearLayout heading = column();
-        heading.setPadding(dp(22), dp(18), dp(22), dp(10));
-        add(heading, label(preview.chat(), 19, INK, true), 0);
-        add(heading, label("勾选要保存的待办。明天等相对日期以扫描当天为准，请核对旧消息的截止时间。",
-                14, SUBTLE, false), 4);
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setCustomTitle(heading)
-                .setMultiChoiceItems(entries, selected, (window, index, checked) -> {
-                    selected[index] = checked;
-                    ((AlertDialog) window).getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(hasSelection(selected));
+                .setPositiveButton("开启", (dialog, which) -> {
+                    WeChatChatReader.setEnabled(this, true);
+                    showChatReaderStatus();
+                    if (!WeChatChatReader.hasAccess(this)) {
+                        openAccessibilitySettings();
+                    }
                 })
-                .setNegativeButton("取消", null)
-                .setPositiveButton("保存选中的待办", (window, which) -> saveChatTasks(preview, deadlines, selected))
                 .show();
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
     }
 
-    private static boolean hasSelection(boolean[] selected) {
-        for (boolean item : selected) {
-            if (item) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void saveChatTasks(WeChatChatReader.Preview preview, List<Long> deadlines, boolean[] selected) {
-        TaskStore store = TaskStore.get(this);
-        int added = 0;
-        int duplicate = 0;
-        for (int i = 0; i < selected.length; i++) {
-            if (selected[i]) {
-                if (store.addFromChat(preview.chat(), preview.messages().get(i), deadlines.get(i))) {
-                    added++;
-                } else {
-                    duplicate++;
-                }
-            }
-        }
-        if (added > 0) {
-            Reminders.scheduleNext(this);
-            showTasks();
-        }
-        Toast.makeText(this, getString(R.string.read_result, added, duplicate), Toast.LENGTH_LONG).show();
+    private void openAccessibilitySettings() {
+        openSettings(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
     }
 
     private void showTasks() {

@@ -1,169 +1,120 @@
 package com.wechattodo.assistant;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
-import android.content.res.ColorStateList;
-import android.graphics.PixelFormat;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.Gravity;
-import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
-import android.widget.Button;
-import android.widget.Toast;
+import android.view.accessibility.AccessibilityManager;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
-import java.lang.ref.WeakReference;
 import java.time.ZonedDateTime;
-import java.util.List;
 
 public final class WeChatChatReader extends AccessibilityService {
-    private static WeakReference<WeChatChatReader> connected = new WeakReference<>(null);
-    private static final long ARM_TIME = 90_000;
-    private static final long PREVIEW_TIME = 120_000;
+    private static final String PREFERENCES = "chat_reader";
+    private static final String AUTO_READ = "auto_read";
+    private static final long SCAN_DELAY = 350;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable expire = this::disarm;
-    private final Runnable clearPreview = () -> preview = null;
-    private boolean armed;
-    private Button overlay;
-    private Preview preview;
+    private final Runnable scan = this::readVisibleChat;
+    private int eventWindowId = -1;
+    private VisibleWeChatChat lastScan;
 
-    record Preview(String chat, List<String> messages, ZonedDateTime scannedAt) {}
-
-    static boolean armReader() {
-        WeChatChatReader reader = connected.get();
-        if (reader == null) {
-            return false;
-        }
-        reader.arm();
-        return true;
+    static boolean isEnabled(Context context) {
+        return preferences(context).getBoolean(AUTO_READ, false);
     }
 
-    static Preview takePreview() {
-        WeChatChatReader reader = connected.get();
-        if (reader == null) {
-            return null;
-        }
-        Preview result = reader.preview;
-        reader.clearPreview.run();
-        return result;
+    static void setEnabled(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean(AUTO_READ, enabled).apply();
     }
 
-    static boolean isReady() {
-        return connected.get() != null;
+    static boolean hasAccess(Context context) {
+        ComponentName component = new ComponentName(context, WeChatChatReader.class);
+        AccessibilityManager manager = context.getSystemService(AccessibilityManager.class);
+        return manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK).stream()
+                .anyMatch(service -> component.equals(ComponentName.unflattenFromString(service.getId())));
+    }
+
+    private static SharedPreferences preferences(Context context) {
+        return context.getSharedPreferences(PREFERENCES, MODE_PRIVATE);
     }
 
     @Override
     protected void onServiceConnected() {
-        connected = new WeakReference<>(this);
-    }
-
-    private void arm() {
-        disarm();
-        clearPreview.run();
-        armed = true;
-        handler.postDelayed(expire, ARM_TIME);
+        scheduleScan();
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!armed || event.getPackageName() == null) {
-            return;
-        }
-        String app = event.getPackageName().toString();
-        if (WeChatListener.WECHAT.equals(app)) {
-            showOverlay();
-        } else if (!getPackageName().equals(app)
-                || MainActivity.class.getName().equals(String.valueOf(event.getClassName()))) {
-            hideOverlay();
+        if (WeChatListener.WECHAT.equals(String.valueOf(event.getPackageName()))) {
+            eventWindowId = event.getWindowId();
+            scheduleScan();
         }
     }
 
-    private void showOverlay() {
-        if (overlay != null) {
-            return;
-        }
-        Button button = new Button(this);
-        button.setText("读取当前聊天");
-        button.setTextColor(0xFFFFFFFF);
-        button.setBackgroundTintList(ColorStateList.valueOf(0xFF116654));
-        button.setOnClickListener(view -> {
-            disarm();
-            handler.postDelayed(this::readVisibleChat, 120);
-        });
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.END;
-        float density = getResources().getDisplayMetrics().density;
-        params.x = Math.round(12 * density);
-        params.y = Math.round(76 * density);
-        try {
-            getSystemService(WindowManager.class).addView(button, params);
-            overlay = button;
-        } catch (WindowManager.BadTokenException ignored) {
-            disarm();
+    private void scheduleScan() {
+        if (!isEnabled(this)) {
+            lastScan = null;
+        } else if (!handler.hasCallbacks(scan)) {
+            handler.postDelayed(scan, SCAN_DELAY);
         }
     }
 
     private void readVisibleChat() {
-        if (connected.get() != this) {
+        if (!isEnabled(this)) {
+            lastScan = null;
             return;
         }
-        VisibleWeChatChat chat = VisibleWeChatChat.read(getRootInActiveWindow(0));
-        if (chat == null) {
-            toast("未识别到当前微信聊天。请打开聊天并切到文字输入模式后重试。");
-        } else if (chat.messages().isEmpty()) {
-            toast("当前页面没有识别到待办文字。");
-        } else {
-            preview = new Preview(chat.title(), chat.messages(), ZonedDateTime.now());
-            handler.removeCallbacks(clearPreview);
-            handler.postDelayed(clearPreview, PREVIEW_TIME);
-            toast("已找到候选待办，请回到微信待办助手勾选保存。");
+        VisibleWeChatChat chat = VisibleWeChatChat.read(activeWeChatRoot());
+        if (chat == null || chat.equals(lastScan)) {
+            return;
+        }
+        lastScan = chat;
+        if (TaskStore.get(this).addFromChat(chat, ZonedDateTime.now())) {
+            Reminders.scheduleNext(this);
+            TaskStore.signalChange(this);
         }
     }
 
-    private void toast(String text) {
-        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
-    }
-
-    private void hideOverlay() {
-        if (overlay != null) {
-            getSystemService(WindowManager.class).removeViewImmediate(overlay);
-            overlay = null;
+    private AccessibilityNodeInfo activeWeChatRoot() {
+        AccessibilityNodeInfo active = getRootInActiveWindow(0);
+        if (isWeChat(active)) {
+            return active;
         }
+        for (AccessibilityWindowInfo window : getWindows()) {
+            if (window.getId() == eventWindowId && window.getType() == AccessibilityWindowInfo.TYPE_APPLICATION
+                    && window.isFocused()) {
+                AccessibilityNodeInfo root = window.getRoot(0);
+                return isWeChat(root) ? root : null;
+            }
+        }
+        return null;
     }
 
-    private void disarm() {
-        armed = false;
-        handler.removeCallbacks(expire);
-        hideOverlay();
+    private static boolean isWeChat(AccessibilityNodeInfo node) {
+        return node != null && WeChatListener.WECHAT.equals(String.valueOf(node.getPackageName()));
     }
 
     @Override
     public void onInterrupt() {
-        disarm();
+        handler.removeCallbacks(scan);
+        eventWindowId = -1;
+        lastScan = null;
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
-        closeReader();
+        onInterrupt();
         return super.onUnbind(intent);
     }
 
     @Override
     public void onDestroy() {
-        closeReader();
+        onInterrupt();
         super.onDestroy();
-    }
-
-    private void closeReader() {
-        disarm();
-        clearPreview.run();
-        handler.removeCallbacksAndMessages(null);
-        if (connected.get() == this) {
-            connected.clear();
-        }
     }
 }

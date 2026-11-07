@@ -2,12 +2,16 @@
 <resources>
     <string name="app_name">微信待办助手</string>
     <string name="chat_reader_label">微信待办助手 · 当前聊天读取</string>
-    <string name="chat_reader_description">仅在你主动发起读取时查看当前微信聊天页面，并由你选择要保存在手机上的待办。</string>
+    <string name="chat_reader_description">开启自动识别后，从微信当前可见的聊天消息中提取待办并保存在手机上。</string>
     <string name="app_subtitle">V%1$s  ·  本地整理微信待办</string>
     <string name="update_source">从 GitHub 获取最新发布，无需登录。</string>
     <string name="checking_update">正在检查 GitHub 最新发布…</string>
     <string name="downloading_update">正在下载 %1$s…</string>
-    <string name="read_result">已新增 %1$d 项待办，跳过 %2$d 项重复内容。</string>
+    <string name="auto_read_start">开启自动识别</string>
+    <string name="auto_read_stop">关闭自动识别</string>
+    <string name="auto_read_off">开启后，打开微信聊天即可自动添加待办。</string>
+    <string name="auto_read_on">已开启。打开微信聊天后，可见消息中的待办会自动加入列表。</string>
+    <string name="auto_read_waiting">请在系统辅助功能中开启「微信待办助手 · 当前聊天读取」。</string>
     <string name="permission_status">通知读取 %1$s  ·  到期提醒 %2$s</string>
     <string name="enabled">已开启</string>
     <string name="disabled">未开启</string>

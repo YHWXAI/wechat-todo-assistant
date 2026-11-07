@@ -20,6 +20,13 @@ final class TaskRules {
             "(?:(\\d{4})年)?(\\d{1,2})月(\\d{1,2})(?:日|号)?(?!\\d)");
     private static final Pattern NUMERIC_DATE = Pattern.compile(
             "(?<!\\d)(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})(?!\\d)");
+    private static final Pattern FULL_CHINESE_DATE = Pattern.compile("\\d{4}年\\d{1,2}月\\d{1,2}[日号]");
+    private static final Pattern CHAT_REQUEST = Pattern.compile(
+            "(?:^|[，。！；,\\s]|早上|上午|中午|下午|晚上|下班)你(?:先|再|顺便|可以)?"
+                    + "(?:买|带|拿|取|接|发|交|准备|联系|处理)"
+                    + "|(?:回来|回家|下班)(?:的时候|时候|路上|前|后)(?:顺便)?(?:带|买|拿|取)");
+    private static final Pattern CHECKING_STATUS = Pattern.compile(
+            "(?:买|带|拿|取|接|发|交)(?:了|完|到了)(?:没有|没|吗|么)|(?:怎么买|去哪儿买|哪里买)");
     private static final String HOUR = "[0-9零〇一二两三四五六七八九十]{1,3}";
     private static final Pattern TIME = Pattern.compile(
             "(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|夜里|早|晚)?\\s*(?<!\\d)("
@@ -37,6 +44,23 @@ final class TaskRules {
         boolean hasDate = RELATIVE.matcher(text).find() || CHINESE_DATE.matcher(text).find()
                 || NUMERIC_DATE.matcher(text).find();
         return (REQUEST.matcher(text).find() || hasDate) && ACTION.matcher(text).find();
+    }
+
+    static boolean isChatTask(String message) {
+        if (isTask(message)) {
+            return true;
+        }
+        String text = normalize(message);
+        return CHAT_REQUEST.matcher(text).find() && !CHECKING_STATUS.matcher(text).find();
+    }
+
+    static Long dueFromChat(String message, ZonedDateTime scanned) {
+        String text = normalize(message);
+        if (!NUMERIC_DATE.matcher(text).find() && !FULL_CHINESE_DATE.matcher(text).find()) {
+            return null;
+        }
+        Long due = dueAt(text, scanned);
+        return due != null && due > scanned.toInstant().toEpochMilli() ? due : null;
     }
 
     static Long dueAt(String message, ZonedDateTime received) {
