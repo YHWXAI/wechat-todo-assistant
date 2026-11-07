@@ -15,4 +15,25 @@ Android 13 及以上适用。微信待办助手支持从微信通知和当前可
 
 本项目使用 JDK 17、Gradle 8.9 和 Android SDK 35。配置 Android SDK 路径后运行 `gradlew.bat :app:assembleDebug :app:lintDebug`。
 
-发布时提高 `versionCode` 和 `versionName`，使用与已安装版本相同的本地签名密钥。将签名 APK 发布到 `updates` 分支的 `v<版本>/WeChatTodo-debug.apk`，并在同一个提交更新分支根目录的 `WeChatTodo-debug.apk` 和 `updates.json`。版本文件包含 `version`（例如 `v0.2.1`）、`size`（字节数）及 `digest`（以 `sha256:` 开头的 SHA-256）。旧版本的文件路径应保留，供仍拿到缓存版本信息的手机使用。请在本地妥善保存签名密钥。
+发布时提高 `versionCode` 和 `versionName`，使用与已安装版本相同的签名密钥。将签名 APK 发布到 `updates` 分支的 `v<版本>/WeChatTodo-debug.apk`，并在同一个提交更新分支根目录的 `WeChatTodo-debug.apk` 和 `updates.json`。版本文件包含 `version`（例如 `v0.2.1`）、`size`（字节数）及 `digest`（以 `sha256:` 开头的 SHA-256）。旧版本的文件路径应保留，供仍拿到缓存版本信息的手机使用。请妥善备份原签名密钥。
+
+## 云端签名与发布
+
+GitHub Actions 中的 **Publish signed Android update** 工作流可在 `main` 分支手动运行，使用仓库的加密 Actions Secrets 签名，再更新 `updates` 分支。工作流先构建并运行 Lint，随后检查原始签名指纹、应用标识和递增的版本号。任一检查失败时不会推送更新，也不会替换历史版本。
+
+首次从原打包电脑迁移密钥时，在 GitHub CLI 中运行 `gh auth login --web`，然后在项目根目录的 PowerShell 执行：
+
+```powershell
+powershell -NoProfile -File .\scripts\upload-signing-key.ps1 -KeystorePath '原签名文件的完整路径'
+```
+
+脚本通过 GitHub CLI 将以下值加密后上传至仓库 Actions Secrets，不将密钥提交到仓库，也不将密码放在命令参数或输出中：
+
+- `ANDROID_KEYSTORE_BASE64`：原签名文件的 Base64 内容。
+- `ANDROID_KEYSTORE_PASSWORD`：密钥库密码。
+- `ANDROID_KEY_ALIAS`：签名条目别名。
+- `ANDROID_KEY_PASSWORD`：该条目的密码。
+
+标准 Android 调试密钥的别名通常为 `androiddebugkey`，密钥库和条目密码通常均为 `android`；自定义密钥应使用原来设置的值。不要在聊天、Issue、日志或普通仓库文件中粘贴这些值。Secrets 设置页位于仓库 **Settings → Secrets and variables → Actions**；不要使用普通 Variables 存储密钥。
+
+密钥只在工作流签名阶段恢复到临时目录，步骤结束后清理，不上传为构建产物。云端流程完成并确认手机可以覆盖更新之后，可移除原电脑上的副本；另在密码管理器或加密离线存储中保留可恢复的备份，避免丢失后无法继续更新。上传脚本不会自动删除本地文件。
