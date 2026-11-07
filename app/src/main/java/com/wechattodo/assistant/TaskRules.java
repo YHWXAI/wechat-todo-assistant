@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 
 final class TaskRules {
     private static final Pattern REQUEST = Pattern.compile(
-            "请(?!问|教)|麻烦|帮我|帮忙|记得|别忘|需要你|辛苦|务必|待办|提醒我");
+            "请(?!问|教)|麻烦|帮我|帮忙|记得|别忘|不要忘|需要你|辛苦|务必|待办|提醒我");
     private static final Pattern ACTION = Pattern.compile(
             "发(?!生|现|烧)|回(?!家)|交|提[交供]|处[理]|确认|审核|整理|完成|开会|参会|"
                     + "修改|更新|安排|准备|提交|跟进|联系|付款|支付|打电话|查[看询]|检查|带|取|买|签|给");
@@ -25,8 +25,23 @@ final class TaskRules {
             "(?:^|[，。！；,\\s]|早上|上午|中午|下午|晚上|下班)你(?:先|再|顺便|可以)?"
                     + "(?:买|带|拿|取|接|发|交|准备|联系|处理)"
                     + "|(?:回来|回家|下班)(?:的时候|时候|路上|前|后)(?:顺便)?(?:带|买|拿|取)");
-    private static final Pattern CHECKING_STATUS = Pattern.compile(
-            "(?:买|带|拿|取|接|发|交)(?:了|完|到了)(?:没有|没|吗|么)|(?:怎么买|去哪儿买|哪里买)");
+    private static final Pattern CHAT_STATUS = Pattern.compile(
+            "(?:了|过|好|完)(?:没有|没|吗|么)");
+    private static final Pattern CHAT_CANCELLED = Pattern.compile(
+            "(?:不用|不必|无需|别|不要)(?:你|再|先)?(?:今天|明天|后天)?"
+                    + "(?:发|交|买|带|拿|取|接|寄|联系|处理|准备|开会|确认|付款|支付)"
+                    + "|取消(?:任务|待办|安排|会议|了|吧|$)");
+    private static final Pattern CHAT_CHECK_REQUEST = Pattern.compile(
+            "(?:请|麻烦|帮我|帮忙).{0,8}(?:查|确认|核对|看一下)");
+    private static final Pattern CHAT_REPORTED = Pattern.compile(
+            "(?:昨天|前天|之前|上次|刚才).{0,12}(?:说|问)|(?:原话|引用|转述)(?:是|为|说)");
+    private static final Pattern CHAT_DESCRIPTION = Pattern.compile(
+            "你(?:买|带|拿|取|接|发|交)的|(?:什么|啥|哪里|哪儿|怎么|多少|几点|什么时候)");
+    private static final Pattern CHAT_SELF_REPORT = Pattern.compile(
+            "(?:我|我们).{0,10}(?:已经|刚刚|刚|会|准备|打算|计划|要|已)"
+                    + "|(?:已经|刚刚|刚才).{0,12}(?:发|交|买|带|拿|取|接|寄|联系|处理|完成)");
+    private static final Pattern CHAT_FINISHED = Pattern.compile(
+            "(?:买|带|拿|取|接|发|交|处理|准备).{0,12}(?:好了|完了|过了|到了)");
     private static final String HOUR = "[0-9零〇一二两三四五六七八九十]{1,3}";
     private static final Pattern TIME = Pattern.compile(
             "(凌晨|早上|上午|中午|下午|傍晚|晚上|晚间|夜里|早|晚)?\\s*(?<!\\d)("
@@ -47,11 +62,22 @@ final class TaskRules {
     }
 
     static boolean isChatTask(String message) {
-        if (isTask(message)) {
-            return true;
+        for (String clause : normalize(message).split("[，。！？；,!?;\\n]+")) {
+            boolean checking = CHAT_CHECK_REQUEST.matcher(clause).find();
+            boolean statusQuestion = CHAT_STATUS.matcher(clause).find() && !checking;
+            if (statusQuestion || CHAT_CANCELLED.matcher(clause).find() || CHAT_REPORTED.matcher(clause).find()) {
+                continue;
+            }
+            boolean explicitRequest = REQUEST.matcher(clause).find();
+            if (!explicitRequest && (CHAT_DESCRIPTION.matcher(clause).find()
+                    || CHAT_SELF_REPORT.matcher(clause).find() || CHAT_FINISHED.matcher(clause).find())) {
+                continue;
+            }
+            if (isTask(clause) || CHAT_REQUEST.matcher(clause).find()) {
+                return true;
+            }
         }
-        String text = normalize(message);
-        return CHAT_REQUEST.matcher(text).find() && !CHECKING_STATUS.matcher(text).find();
+        return false;
     }
 
     static Long dueFromChat(String message, ZonedDateTime scanned) {
