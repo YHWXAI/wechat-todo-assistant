@@ -1,0 +1,10 @@
+.android-tools/
+.gradle/
+**/build/
+local.properties
+*.apk
+*.jks
+*.keystore
+.env
+.env.*
+.idea/
