@@ -212,7 +212,8 @@ public final class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle(R.string.auto_read_start)
-                .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息，并在手机上保存匹配的待办。"
+                .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息。"
+                        + "你可以在微信中确认要保存到手机上的待办。"
                         + "你可以随时在这里关闭自动识别。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("开启", (dialog, which) -> {

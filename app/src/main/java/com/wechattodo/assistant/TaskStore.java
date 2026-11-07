@@ -32,7 +32,7 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     private TaskStore(Context context) {
-        super(context, "tasks.db", null, 2);
+        super(context, "tasks.db", null, 3);
     }
 
     @Override
@@ -48,31 +48,42 @@ final class TaskStore extends SQLiteOpenHelper {
     public void onUpgrade(SQLiteDatabase database, int previous, int current) {
         if (previous < 2) {
             createChatHistory(database);
+        } else if (previous < 3) {
+            database.execSQL("ALTER TABLE chat_seen ADD COLUMN accepted INTEGER NOT NULL DEFAULT 1");
         }
     }
 
     private static void createChatHistory(SQLiteDatabase database) {
-        database.execSQL("CREATE TABLE chat_seen (fingerprint TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)");
+        database.execSQL("CREATE TABLE chat_seen (fingerprint TEXT PRIMARY KEY, "
+                + "seen_at INTEGER NOT NULL, accepted INTEGER NOT NULL DEFAULT 1)");
     }
 
-    boolean addFromChat(VisibleWeChatChat chat, ZonedDateTime scanned) {
-        if (chat.messages().isEmpty()) {
-            return false;
+    String nextChatCandidate(VisibleWeChatChat chat) {
+        SQLiteDatabase database = getReadableDatabase();
+        for (String body : chat.messages()) {
+            String key = fingerprint(chat.title(), body, 0);
+            try (Cursor seen = database.query("chat_seen", new String[]{"fingerprint"},
+                    "fingerprint = ?", new String[]{key}, null, null, null, "1")) {
+                if (!seen.moveToFirst() && !alreadyInChat(database, chat.title(), body)) {
+                    return body;
+                }
+            }
         }
+        return null;
+    }
+
+    boolean resolveChatCandidate(String chat, String body, boolean accepted, ZonedDateTime now) {
         SQLiteDatabase database = getWritableDatabase();
-        long now = scanned.toInstant().toEpochMilli();
-        boolean added = false;
         database.beginTransaction();
         try {
-            for (String body : chat.messages()) {
-                ContentValues seen = new ContentValues();
-                seen.put("fingerprint", fingerprint(chat.title(), body, 0));
-                seen.put("seen_at", now);
-                long id = database.insertWithOnConflict("chat_seen", null, seen, SQLiteDatabase.CONFLICT_IGNORE);
-                if (id != -1 && !alreadyInChat(database, chat.title(), body)) {
-                    insertTask(database, chat.title(), body, TaskRules.dueFromChat(body, scanned));
-                    added = true;
-                }
+            ContentValues seen = new ContentValues();
+            seen.put("fingerprint", fingerprint(chat, body, 0));
+            seen.put("seen_at", now.toInstant().toEpochMilli());
+            seen.put("accepted", accepted ? 1 : 0);
+            long id = database.insertWithOnConflict("chat_seen", null, seen, SQLiteDatabase.CONFLICT_IGNORE);
+            boolean added = id != -1 && accepted && !alreadyInChat(database, chat, body);
+            if (added) {
+                insertTask(database, chat, body, TaskRules.dueFromChat(body, now));
             }
             database.setTransactionSuccessful();
             return added;
@@ -125,7 +136,7 @@ final class TaskStore extends SQLiteOpenHelper {
 
     private boolean recentlyReadInChat(SQLiteDatabase database, String source, String body, long now) {
         try (Cursor cursor = database.query("chat_seen", new String[]{"fingerprint"},
-                "fingerprint IN (?, ?) AND seen_at >= ?",
+                "fingerprint IN (?, ?) AND seen_at >= ? AND accepted = 1",
                 new String[]{fingerprint(source, body, 0), fingerprint(chatName(source), body, 0),
                         Long.toString(now - REPEAT_WINDOW)}, null, null, null, "1")) {
             return cursor.moveToFirst();
