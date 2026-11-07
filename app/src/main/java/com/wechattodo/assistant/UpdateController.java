@@ -24,13 +24,14 @@ final class UpdateController {
     private final Button check;
     private final Button install;
     private boolean waitingForPermission;
+    private boolean checkedOnStart;
 
     UpdateController(Activity activity, TextView status, Button check, Button install) {
         this.activity = activity;
         this.status = status;
         this.check = check;
         this.install = install;
-        check.setOnClickListener(view -> check());
+        check.setOnClickListener(view -> check(true));
         install.setOnClickListener(view -> launchInstaller());
         status.setText(R.string.update_source);
     }
@@ -41,6 +42,12 @@ final class UpdateController {
             waitingForPermission = false;
             if (activity.getPackageManager().canRequestPackageInstalls() && install.getVisibility() == View.VISIBLE) {
                 launchInstaller();
+            }
+        }
+        if (!checkedOnStart) {
+            checkedOnStart = true;
+            if (install.getVisibility() != View.VISIBLE) {
+                check(false);
             }
         }
     }
@@ -54,7 +61,7 @@ final class UpdateController {
         }
     }
 
-    private void check() {
+    private void check(boolean download) {
         String repository = BuildConfig.UPDATE_REPOSITORY;
         setBusy(true);
         status.setText(R.string.checking_update);
@@ -63,6 +70,10 @@ final class UpdateController {
                 GitHubUpdates.Release release = GitHubUpdates.latest(repository);
                 if (release == null) {
                     finish("当前已经是最新发布版本。", false);
+                    return;
+                }
+                if (!download) {
+                    finish("发现新版 " + release.version() + "。点击「检查并下载更新」继续。", false);
                     return;
                 }
                 activity.runOnUiThread(() -> {

@@ -68,10 +68,11 @@ public final class WeChatListener extends NotificationListenerService {
     }
 
     private boolean capture(String source, String body, long received, long messageTime) {
-        if (!TaskRules.isTask(body)) {
+        TaskRules.Match task = TaskRules.notificationTask(body);
+        if (task == null) {
             return false;
         }
-        Long due = TaskRules.dueAt(body, Instant.ofEpochMilli(received).atZone(ZoneId.systemDefault()));
+        Long due = task.dueAt(Instant.ofEpochMilli(received).atZone(ZoneId.systemDefault()));
         return TaskStore.get(this).add(source.isEmpty() ? "微信" : source, body, due, messageTime) != null;
     }
 

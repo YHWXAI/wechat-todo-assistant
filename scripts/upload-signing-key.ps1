@@ -14,7 +14,7 @@ if (-not $KeystorePath) {
     else {
         Add-Type -AssemblyName System.Windows.Forms
         $dialog = New-Object System.Windows.Forms.OpenFileDialog
-        $dialog.Title = 'Select the ORIGINAL debug.keystore used by the installed app'
+        $dialog.Title = 'Select the signing keystore for the current Android update channel'
         $dialog.Filter = 'Android signing key|*.keystore;*.jks'
         try {
             if ($dialog.ShowDialog() -ne 'OK') { throw 'No key selected; nothing uploaded.' }
