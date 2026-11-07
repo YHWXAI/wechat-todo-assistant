@@ -21,7 +21,7 @@ Android 13 及以上适用。微信待办助手支持从微信通知和当前可
 
 GitHub Actions 中的 **Publish signed Android update** 工作流可在 `main` 分支手动运行，使用仓库的加密 Actions Secrets 签名，再更新 `updates` 分支。工作流先构建并运行 Lint，随后检查原始签名指纹、应用标识和递增的版本号。任一检查失败时不会推送更新，也不会替换历史版本。
 
-首次从原打包电脑迁移密钥时，在 GitHub CLI 中运行 `gh auth login --web`，然后在项目根目录的 PowerShell 执行：
+首次从原打包电脑迁移密钥时，在 PowerShell 中运行下面的上传脚本。无需安装 Git 或 GitHub CLI：脚本会下载并校验 GitHub 官方便携版工具，必要时引导你在浏览器中登录 GitHub。
 
 ```powershell
 powershell -NoProfile -File .\scripts\upload-signing-key.ps1
@@ -35,5 +35,7 @@ powershell -NoProfile -File .\scripts\upload-signing-key.ps1
 - `ANDROID_KEY_PASSWORD`：该条目的密码。
 
 标准 Android 调试密钥的别名通常为 `androiddebugkey`，密钥库和条目密码通常均为 `android`；自定义密钥应使用原来设置的值。不要在聊天、Issue、日志或普通仓库文件中粘贴这些值。Secrets 设置页位于仓库 **Settings → Secrets and variables → Actions**；不要使用普通 Variables 存储密钥。
+
+独立下载运行脚本时会弹出文件选择框。已经确认是标准调试密钥的，可添加 `-UseStandardDebugKey` 使用上述默认值。上传成功后脚本会启动 **Verify hosted Android signing key** 工作流，实际用托管密钥签署 APK 并核对原始证书，不发布新版本。只有该验证运行成功才报告托管验证成功；权限、密码或签名不符时会报错。此操作仍需要使用拥有仓库 Secrets 管理权限的 GitHub 账号完成一次浏览器授权。
 
 密钥只在工作流签名阶段恢复到临时目录，步骤结束后清理，不上传为构建产物。云端流程完成并确认手机可以覆盖更新之后，可移除原电脑上的副本；另在密码管理器或加密离线存储中保留可恢复的备份，避免丢失后无法继续更新。上传脚本不会自动删除本地文件。

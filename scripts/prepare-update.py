@@ -36,7 +36,7 @@ def package_info(aapt, apk):
     return int(code), version
 
 
-def prepare(apk, channel):
+def prepare(apk, channel, verify_only=False):
     for name in ('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD',
                  'ANDROID_KEY_ALIAS', 'ANDROID_KEY_PASSWORD'):
         if not os.environ.get(name):
@@ -63,6 +63,9 @@ def prepare(apk, channel):
                         '--key-pass', 'env:ANDROID_KEY_PASSWORD',
                         '--out', str(signed), str(apk)], check=True)
         certificate(apksigner, signed)
+        if verify_only:
+            print('Original signing key verified; update channel unchanged')
+            return
         new_code, version = package_info(aapt, signed)
         if new_code <= old_code or tuple(map(int, version.split('.'))) <= tuple(map(int, old_version.split('.'))):
             raise ValueError('Both versionCode and versionName must increase before publishing')
@@ -84,6 +87,8 @@ def prepare(apk, channel):
 
 if __name__ == '__main__':
     try:
-        prepare(Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve())
+        if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] != '--verify-key'):
+            sys.exit('Usage: prepare-update.py APK CHANNEL [--verify-key]')
+        prepare(Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(), len(sys.argv) == 4)
     except (ValueError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))
