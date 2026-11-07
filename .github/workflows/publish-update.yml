@@ -34,7 +34,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Install Android SDK packages
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+        run: bash source/scripts/setup-android.sh 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
       - name: Build and lint
         working-directory: source
         run: bash gradlew --no-daemon --max-workers=4 :app:assembleDebug :app:lintDebug

@@ -38,4 +38,8 @@ powershell -NoProfile -File .\scripts\upload-signing-key.ps1
 
 独立下载运行脚本时会弹出文件选择框。已经确认是标准调试密钥的，可添加 `-UseStandardDebugKey` 使用上述默认值。上传成功后脚本会启动 **Verify hosted Android signing key** 工作流，实际用托管密钥签署 APK 并核对原始证书，不发布新版本。只有该验证运行成功才报告托管验证成功；权限、密码或签名不符时会报错。此操作仍需要使用拥有仓库 Secrets 管理权限的 GitHub 账号完成一次浏览器授权。
 
+如果云端的 GitHub 集成可以推送代码或运行 Actions，但 Secrets API 返回 `Resource not accessible by integration`，仍缺少管理 Secrets 的权限；调整工作流的 `contents` 权限无法补齐这一权限。可由仓库管理员升级 GitHub App 授权，或创建仅允许访问本仓库的 fine-grained PAT，授予仓库 `Secrets: Read and write`、`Actions: Read and write` 和 `Contents: Read-only` 权限。Token 应通过云环境的安全 HTTP 密钥设置提供（例如变量名 `REPO_ACTIONS_TOKEN`，目标域名 `api.github.com`），不得发送到聊天或写入仓库。使用前先检查现有绑定和权限，上传时通过 stdin 传递秘密值。
+
+两个工作流均通过 `scripts/setup-android.sh` 初始化 SDK，不依赖镜像预先将 `sdkmanager` 加入 PATH。命令行工具缺失时从 Google 官方下载固定版本并校验 SHA-256。工作流修复后应从最新 `main` 发起一次新的验证运行；重跑旧记录可能继续使用旧版工作流。
+
 密钥只在工作流签名阶段恢复到临时目录，步骤结束后清理，不上传为构建产物。云端流程完成并确认手机可以覆盖更新之后，可移除原电脑上的副本；另在密码管理器或加密离线存储中保留可恢复的备份，避免丢失后无法继续更新。上传脚本不会自动删除本地文件。

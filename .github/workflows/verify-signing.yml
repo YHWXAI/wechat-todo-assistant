@@ -29,7 +29,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Install signing tools
-        run: sdkmanager 'build-tools;35.0.0'
+        run: bash source/scripts/setup-android.sh 'build-tools;35.0.0'
       - name: Verify encrypted key by signing an APK
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
