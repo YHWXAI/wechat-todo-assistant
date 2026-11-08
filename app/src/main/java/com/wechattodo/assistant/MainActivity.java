@@ -10,6 +10,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.graphics.Typeface;
@@ -30,6 +31,7 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -40,6 +42,7 @@ import java.util.List;
 
 import com.wechattodo.assistant.BottomNavigation.Tab;
 import com.wechattodo.assistant.MonitoringRules.App;
+import com.wechattodo.assistant.TaskCardView.Mode;
 
 public final class MainActivity extends Activity {
     private static final int BACKGROUND = 0xFFF3F7F5;
@@ -48,6 +51,11 @@ public final class MainActivity extends Activity {
     private static final int GREEN = 0xFF116654;
     private static final int WHITE = 0xFFFFFFFF;
     private static final String SELECTED_TAB = "selected_tab";
+    private static final String FEATURED_TASK = "featured_task";
+    private static final String FEATURED_EXPANDED = "featured_expanded";
+    private static final String COMPACT_TASKS = "compact_tasks";
+    private static final String SORT_BY_DEADLINE = "sort_by_deadline";
+    private static final long NO_FEATURED_TASK = -1;
 
     private final BroadcastReceiver changes = new BroadcastReceiver() {
         @Override
@@ -66,6 +74,10 @@ public final class MainActivity extends Activity {
     private BottomNavigation navigation;
     private Tab selectedTab = Tab.HOME;
     private Tab lastTaskTab = Tab.HOME;
+    private long featuredTaskId = NO_FEATURED_TASK;
+    private boolean featuredExpanded;
+    private boolean compactTasks;
+    private boolean sortByDeadline;
     private TextView taskTitle;
     private ScrollView taskScroll;
     private TextView status;
@@ -118,6 +130,9 @@ public final class MainActivity extends Activity {
             int index = savedState.getInt(SELECTED_TAB);
             Tab[] tabs = Tab.values();
             if (index >= 0 && index < tabs.length) selectTab(tabs[index]);
+            featuredTaskId = savedState.getLong(FEATURED_TASK, NO_FEATURED_TASK);
+            featuredExpanded = savedState.getBoolean(FEATURED_EXPANDED);
+            compactTasks = savedState.getBoolean(COMPACT_TASKS);
         }
     }
 
@@ -128,13 +143,64 @@ public final class MainActivity extends Activity {
         taskTitle = label(getString(R.string.app_name), 28, INK, true);
         header.addView(taskTitle);
 
-        taskScroll = new ScrollView(this);
+        taskScroll = new TaskListScrollView(this, this::collapseTaskCards);
         LinearLayout page = scrollBody(screen, taskScroll);
         count = label("", 20, INK, true);
         add(page, count, 12);
+        add(page, createTaskSortControl(), 8);
         taskList = column();
         add(page, taskList, 0);
         return screen;
+    }
+
+    private View createTaskSortControl() {
+        SharedPreferences preferences = getPreferences(MODE_PRIVATE);
+        sortByDeadline = preferences.getBoolean(SORT_BY_DEADLINE, true);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(4), 0, dp(4), 0);
+        GradientDrawable track = new GradientDrawable();
+        track.setColor(0xFFE5EDE9);
+        track.setCornerRadius(dp(24));
+        row.setBackground(track);
+
+        SeekBar sort = new SeekBar(this);
+        sort.setMax(1);
+        sort.setProgress(sortByDeadline ? 1 : 0);
+        sort.setMinimumHeight(dp(48));
+        sort.setContentDescription(getText(R.string.task_sort_label));
+        Button added = button(getString(R.string.task_sort_added), view -> sort.setProgress(0));
+        Button deadline = button(getString(R.string.task_sort_deadline), view -> sort.setProgress(1));
+        row.addView(added);
+        row.addView(sort, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(deadline);
+
+        Runnable showSelection = () -> {
+            added.setTextColor(sortByDeadline ? SUBTLE : GREEN);
+            deadline.setTextColor(sortByDeadline ? GREEN : SUBTLE);
+            sort.setStateDescription(getText(sortByDeadline ? R.string.task_sort_deadline : R.string.task_sort_added));
+        };
+        showSelection.run();
+        sort.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                sortByDeadline = progress == 1;
+                preferences.edit().putBoolean(SORT_BY_DEADLINE, sortByDeadline).apply();
+                showSelection.run();
+                featuredTaskId = NO_FEATURED_TASK;
+                featuredExpanded = false;
+                taskScroll.scrollTo(0, 0);
+                showTasks();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        return row;
     }
 
     private View createSettingsPage() {
@@ -209,8 +275,13 @@ public final class MainActivity extends Activity {
         int title = tab == Tab.DAILY ? R.string.daily_tasks : tab == Tab.WORK ? R.string.work_tasks : R.string.app_name;
         taskTitle.setText(title);
         taskPage.setAccessibilityPaneTitle(getText(title));
+        if (tab != lastTaskTab) {
+            featuredTaskId = NO_FEATURED_TASK;
+            featuredExpanded = false;
+            compactTasks = false;
+            taskScroll.scrollTo(0, 0);
+        }
         showTasks();
-        if (tab != lastTaskTab) taskScroll.scrollTo(0, 0);
         lastTaskTab = tab;
     }
 
@@ -233,6 +304,9 @@ public final class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         state.putInt(SELECTED_TAB, selectedTab.ordinal());
+        state.putLong(FEATURED_TASK, featuredTaskId);
+        state.putBoolean(FEATURED_EXPANDED, featuredExpanded);
+        state.putBoolean(COMPACT_TASKS, compactTasks);
     }
 
     @Override
@@ -365,14 +439,25 @@ public final class MainActivity extends Activity {
 
     private void showTasks() {
         if (selectedTab == Tab.SETTINGS) return;
-        List<TaskStore.Task> tasks = TaskStore.get(this).list();
+        List<TaskStore.Task> tasks = TaskStore.get(this).list(sortByDeadline);
         List<TaskStore.Task> daily = new ArrayList<>();
         List<TaskStore.Task> work = new ArrayList<>();
+        TaskStore.Task featured = null;
         for (TaskStore.Task task : tasks) {
-            (task.category() == TaskCategory.WORK ? work : daily).add(task);
+            boolean isWork = task.category() == TaskCategory.WORK;
+            (isWork ? work : daily).add(task);
+            if (task.id() == featuredTaskId && (selectedTab == Tab.HOME || isWork == (selectedTab == Tab.WORK))) {
+                featured = task;
+            }
         }
         taskList.removeAllViews();
         taskCards.clear();
+        if (featured != null) {
+            add(taskList, taskCard(featured, featuredExpanded ? Mode.EXPANDED : Mode.COMPACT), 12);
+        } else {
+            featuredTaskId = NO_FEATURED_TASK;
+            featuredExpanded = false;
+        }
         if (selectedTab == Tab.HOME) {
             int workOpen = showTaskGroup(R.string.work_tasks, work);
             int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
@@ -404,17 +489,22 @@ public final class MainActivity extends Activity {
         if (tasks.isEmpty()) {
             add(group, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
         }
+        Mode mode = compactTasks ? Mode.COMPACT : Mode.STANDARD;
         for (TaskStore.Task task : tasks) {
-            add(group, taskCard(task), 10);
+            if (task.id() != featuredTaskId) add(group, taskCard(task, mode), 10);
         }
         return open;
     }
 
-    private View taskCard(TaskStore.Task task) {
+    private TaskCardView taskCard(TaskStore.Task task, Mode mode) {
         TaskCardSource source = TaskCardSource.from(task);
-        TaskCardView card = new TaskCardView(this, task, source, sourceIcon(source.app()));
+        TaskCardView card = new TaskCardView(this, task, source, sourceIcon(source.app()), mode,
+                () -> showTaskDetails(task, source), () -> completeTask(task), this::collapseTaskCards);
         taskCards.add(card);
-        card.setOnClickListener(view -> showTaskDetails(task, source));
+        card.setOnClickListener(view -> {
+            if (featuredTaskId == task.id() && featuredExpanded) collapseTaskCards();
+            else expandTaskCard(task.id(), view.hasFocus());
+        });
         card.setOnLongClickListener(view -> {
             new AlertDialog.Builder(this).setItems(new String[]{"编辑", "删除"}, (dialog, option) -> {
                 if (option == 0) editTask(task);
@@ -423,6 +513,28 @@ public final class MainActivity extends Activity {
             return true;
         });
         return card;
+    }
+
+    private void expandTaskCard(long id, boolean restoreFocus) {
+        featuredTaskId = id;
+        featuredExpanded = true;
+        compactTasks = true;
+        taskScroll.scrollTo(0, 0);
+        showTasks();
+        if (featuredTaskId != id) return;
+        TaskCardView expanded = taskCards.get(0);
+        if (restoreFocus) expanded.requestFocus();
+        expanded.setScaleX(0.97f);
+        expanded.setScaleY(0.97f);
+        expanded.animate().scaleX(1).scaleY(1).setDuration(180).start();
+    }
+
+    private void collapseTaskCards() {
+        if (compactTasks && !featuredExpanded) return;
+        featuredExpanded = false;
+        compactTasks = true;
+        for (TaskCardView card : taskCards) card.setMode(Mode.COMPACT);
+        refreshCountdowns();
     }
 
     private void refreshCountdowns() {
@@ -452,13 +564,13 @@ public final class MainActivity extends Activity {
         AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(source.title())
                 .setMessage(task.body() + "\n\n" + due + (task.done() ? "\n已完成" : ""))
                 .setNegativeButton("关闭", null);
-        if (!task.done()) {
-            dialog.setPositiveButton("完成", (view, action) -> {
-                TaskStore.get(this).complete(task.id());
-                afterTaskChanged(task.id());
-            });
-        }
+        if (!task.done()) dialog.setPositiveButton("完成", (view, action) -> completeTask(task));
         dialog.show();
+    }
+
+    private void completeTask(TaskStore.Task task) {
+        TaskStore.get(this).complete(task.id());
+        afterTaskChanged(task.id());
     }
 
     private void editTask(TaskStore.Task task) {

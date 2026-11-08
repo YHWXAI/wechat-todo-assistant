@@ -240,8 +240,8 @@ final class TaskStore extends SQLiteOpenHelper {
         }
     }
 
-    List<Task> list() {
-        return query(null, "done, due IS NULL, due, _id DESC");
+    List<Task> list(boolean sortByDeadline) {
+        return query(null, sortByDeadline ? "done, due IS NULL, due, _id DESC" : "done, _id DESC");
     }
 
     List<Task> pendingReminders() {
