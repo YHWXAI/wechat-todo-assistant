@@ -215,11 +215,14 @@ final class TaskRules {
         return assess(message, true).match() != null;
     }
 
+    static String classificationText(String message) {
+        Match match = assess(message, true).match();
+        return match == null ? stripQuotedText(normalize(message)) : match.clause();
+    }
+
     private static Assessment assess(String message, boolean chat) {
         String original = normalize(message);
-        String unquoted = FORWARDED_BLOCK.matcher(original).replaceFirst("");
-        unquoted = QUOTED_BLOCK.matcher(unquoted).replaceAll("。");
-        unquoted = QUOTED_CONTENT.matcher(unquoted).replaceAll(" ");
+        String unquoted = stripQuotedText(original);
         boolean blocked = !unquoted.equals(original);
         String[] sentences = unquoted.split("(?<=[。!?;\\r\\n])");
         for (int sentenceIndex = 0; sentenceIndex < sentences.length; sentenceIndex++) {
@@ -293,6 +296,12 @@ final class TaskRules {
             }
         }
         return new Assessment(null, blocked);
+    }
+
+    private static String stripQuotedText(String text) {
+        String withoutForward = FORWARDED_BLOCK.matcher(text).replaceFirst("");
+        String withoutBlocks = QUOTED_BLOCK.matcher(withoutForward).replaceAll("。");
+        return QUOTED_CONTENT.matcher(withoutBlocks).replaceAll(" ");
     }
 
     private static boolean isImmediateOrOffer(String body, boolean followUp, boolean onSite) {

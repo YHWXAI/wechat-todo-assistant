@@ -40,9 +40,10 @@ public final class WeChatChatReader extends AccessibilityService {
     private Candidate candidate;
     private LinearLayout prompt;
 
-    private record Candidate(String chat, String body) {
+    private record Candidate(String chat, String body, String original) {
         boolean isVisibleIn(VisibleWeChatChat page) {
-            return page != null && chat.equals(page.title()) && page.messages().contains(body);
+            return page != null && chat.equals(page.title()) && page.messages().contains(body)
+                    && original.equals(page.original(body));
         }
     }
 
@@ -103,7 +104,7 @@ public final class WeChatChatReader extends AccessibilityService {
             clearChat();
             return;
         }
-        VisibleWeChatChat chat = VisibleWeChatChat.read(activeWeChatRoot());
+        VisibleWeChatChat chat = VisibleWeChatChat.read(activeWeChatRoot(), new MonitoringSettings(this));
         if (chat == null) {
             clearChat();
             return;
@@ -118,7 +119,7 @@ public final class WeChatChatReader extends AccessibilityService {
         closePrompt();
         String body = TaskStore.get(this).nextChatCandidate(chat);
         if (body != null) {
-            showPrompt(new Candidate(chat.title(), body));
+            showPrompt(new Candidate(chat.title(), body, chat.original(body)));
         }
     }
 
@@ -191,7 +192,8 @@ public final class WeChatChatReader extends AccessibilityService {
         if (selected != candidate) {
             return;
         }
-        VisibleWeChatChat current = isEnabled(this) ? VisibleWeChatChat.read(activeWeChatRoot()) : null;
+        VisibleWeChatChat current = isEnabled(this)
+                ? VisibleWeChatChat.read(activeWeChatRoot(), new MonitoringSettings(this)) : null;
         closePrompt();
         lastScan = null;
         if (selected.isVisibleIn(current) && TaskStore.get(this).resolveChatCandidate(

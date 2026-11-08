@@ -33,6 +33,7 @@ import android.widget.Toast;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -126,11 +127,18 @@ public final class MainActivity extends Activity {
         add(permissions, label("权限状态", 17, INK, true), 0);
         status = label("", 14, SUBTLE, false);
         add(permissions, status, 6);
-        listenerButton = button("开启微信通知读取", v -> openSettings(
+        listenerButton = button("开启消息通知读取", v -> openSettings(
                 new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
         add(permissions, listenerButton, 8);
         remindersButton = button("开启到期提醒", v -> requestReminderPermission());
         add(permissions, remindersButton, 4);
+
+        LinearLayout monitoring = card();
+        add(page, monitoring, 12);
+        add(monitoring, label("消息监测", 17, INK, true), 0);
+        add(monitoring, label("选择通讯应用，添加要监测的群，并填写你在群里的昵称。", 14, SUBTLE, false), 6);
+        add(monitoring, button("管理监测应用与会话", view -> startActivity(
+                new Intent(this, MonitoringActivity.class))), 4);
 
         LinearLayout reader = card();
         add(page, reader, 12);
@@ -280,6 +288,7 @@ public final class MainActivity extends Activity {
                 .setTitle(R.string.auto_read_start)
                 .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息。"
                         + "你可以在微信中确认要保存到手机上的待办。"
+                        + "请先在「消息监测」添加要识别的微信会话。"
                         + "你可以随时在这里关闭自动识别。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("开启", (dialog, which) -> {
@@ -298,22 +307,38 @@ public final class MainActivity extends Activity {
 
     private void showTasks() {
         List<TaskStore.Task> tasks = TaskStore.get(this).list();
-        int open = 0;
-        taskList.removeAllViews();
+        List<TaskStore.Task> daily = new ArrayList<>();
+        List<TaskStore.Task> work = new ArrayList<>();
         for (TaskStore.Task task : tasks) {
-            add(taskList, taskCard(task), 8);
+            (TaskCategory.classify(task.body(), task.source()) == TaskCategory.WORK ? work : daily).add(task);
+        }
+        taskList.removeAllViews();
+        int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
+        int workOpen = showTaskGroup(R.string.work_tasks, work);
+        count.setText(getString(R.string.open_task_count, dailyOpen + workOpen));
+        if (tasks.isEmpty()) {
+            add(taskList, label("在右上角「设置」开启通知读取，并在「消息监测」添加要识别的会话。"
+                    + "\n例如「请明天下午3点发送设计稿」。", 14, SUBTLE, false), 16);
+        }
+    }
+
+    private int showTaskGroup(int title, List<TaskStore.Task> tasks) {
+        int open = 0;
+        for (TaskStore.Task task : tasks) {
             if (!task.done()) {
                 open++;
             }
         }
-        count.setText(getString(R.string.open_task_count, open));
+        TextView heading = label(getString(R.string.task_group_count, getString(title), open), 17, INK, true);
+        heading.setAccessibilityHeading(true);
+        add(taskList, heading, 14);
         if (tasks.isEmpty()) {
-            LinearLayout empty = card();
-            add(taskList, empty, 8);
-            add(empty, label("暂无待办", 17, INK, true), 0);
-            add(empty, label("在右上角「设置」开启通知读取后，让微信联系人发来一条会显示通知的消息。"
-                    + "\n例如「请明天下午3点发送设计稿」。", 14, SUBTLE, false), 6);
+            add(taskList, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
         }
+        for (TaskStore.Task task : tasks) {
+            add(taskList, taskCard(task), 8);
+        }
+        return open;
     }
 
     private LinearLayout taskCard(TaskStore.Task task) {

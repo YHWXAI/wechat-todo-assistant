@@ -11,35 +11,46 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
 
+import com.wechattodo.assistant.MonitoringRules.App;
+import com.wechattodo.assistant.MonitoringRules.Channel;
+
 public final class WeChatListener extends NotificationListenerService {
-    static final String WECHAT = "com.tencent.mm";
+    static final String WECHAT = App.WECHAT.packageName;
     private static final long RECENT_MESSAGE = 5 * 60_000L;
 
     @Override
     public void onNotificationPosted(StatusBarNotification posted) {
-        if (posted == null || !WECHAT.equals(posted.getPackageName())) {
+        App app = posted == null ? null : App.fromPackage(posted.getPackageName());
+        if (app == null) {
+            return;
+        }
+        MonitoringSettings settings = new MonitoringSettings(this);
+        if (!settings.enabled(app)) {
             return;
         }
         Notification notification = posted.getNotification();
         Bundle extras = notification.extras;
-        if (extras == null) {
+        if (extras == null || (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
             return;
         }
         String title = text(extras.getCharSequence(Notification.EXTRA_TITLE), 120);
         List<Message> messages = Message.getMessagesFromBundleArray(
                 extras.getParcelableArray(Notification.EXTRA_MESSAGES, Bundle.class));
+        String conversation = text(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE), 120);
+        Boolean group = groupEvidence(extras, messages, conversation.isEmpty() ? title : conversation);
+        Channel channel = MonitoringRules.notification(settings.conversations(app), conversation, title, group);
+        if (channel == null) return;
         boolean changed = false;
         if (!messages.isEmpty()) {
-            String conversation = text(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE), 120);
             for (Message message : messages) {
-                changed |= captureMessage(message, title, conversation, posted.getPostTime());
+                changed |= captureMessage(app, channel, message, posted.getPostTime());
             }
-        } else if ((notification.flags & Notification.FLAG_GROUP_SUMMARY) == 0) {
+        } else {
             String body = text(extras.getCharSequence(Notification.EXTRA_TEXT), 2000);
             if (body.isEmpty()) {
                 body = text(extras.getCharSequence(Notification.EXTRA_BIG_TEXT), 2000);
             }
-            changed = capture(title, body, posted.getPostTime(), 0);
+            changed = capture(app, channel, channel.title(), body, posted.getPostTime(), 0);
         }
         if (changed) {
             Reminders.scheduleNext(this);
@@ -47,7 +58,19 @@ public final class WeChatListener extends NotificationListenerService {
         }
     }
 
-    private boolean captureMessage(Message message, String title, String conversation, long postTime) {
+    private static Boolean groupEvidence(Bundle extras, List<Message> messages, String title) {
+        if (!extras.containsKey(Notification.EXTRA_IS_GROUP_CONVERSATION)) return null;
+        if (extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION)) return true;
+        if (title.isEmpty() || messages.isEmpty()) return null;
+        String expected = MonitoringRules.normalize(title);
+        for (Message message : messages) {
+            Person sender = message.getSenderPerson();
+            if (sender != null && !expected.equals(MonitoringRules.normalize(text(sender.getName(), 120)))) return null;
+        }
+        return false;
+    }
+
+    private boolean captureMessage(App app, Channel channel, Message message, long postTime) {
         long timestamp = message.getTimestamp();
         if (timestamp > 0 && timestamp < postTime - RECENT_MESSAGE) {
             return false;
@@ -57,23 +80,23 @@ public final class WeChatListener extends NotificationListenerService {
         if (sender.isEmpty()) {
             return false;
         }
-        String source = conversation.isEmpty() || conversation.equals(sender)
-                ? sender : conversation + " · " + sender;
-        if (conversation.isEmpty() && !title.isEmpty() && !title.equals(sender)) {
-            source = title + " · " + sender;
-        }
+        String source = channel.title().isEmpty() || channel.title().equals(sender)
+                ? sender : channel.title() + " · " + sender;
         String body = text(message.getText(), 2000);
         long received = timestamp > 0 && timestamp <= postTime ? timestamp : postTime;
-        return capture(source, body, received, timestamp);
+        return capture(app, channel, source, body, received, timestamp);
     }
 
-    private boolean capture(String source, String body, long received, long messageTime) {
-        TaskRules.Match task = TaskRules.notificationTask(body);
+    private boolean capture(App app, Channel channel, String source, String body, long received, long messageTime) {
+        RecipientRules.Decision decision = channel.route(body);
+        if (decision.action() != RecipientRules.Action.AUTO) return false;
+        TaskRules.Match task = TaskRules.notificationTask(decision.text());
         if (task == null) {
             return false;
         }
         Long due = task.dueAt(Instant.ofEpochMilli(received).atZone(ZoneId.systemDefault()));
-        return TaskStore.get(this).add(source.isEmpty() ? "微信" : source, body, due, messageTime) != null;
+        String label = source.isEmpty() ? app.label : app == App.WECHAT ? source : app.label + " · " + source;
+        return TaskStore.get(this).add(label, body, decision.text(), due, messageTime) != null;
     }
 
     static String text(CharSequence value, int limit) {

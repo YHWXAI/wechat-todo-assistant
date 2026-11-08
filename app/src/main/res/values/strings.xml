@@ -11,8 +11,8 @@
     <string name="downloading_update">正在下载 %1$s…</string>
     <string name="auto_read_start">开启自动识别</string>
     <string name="auto_read_stop">关闭自动识别</string>
-    <string name="auto_read_off">开启后，助手会在微信中提示你确认识别出的待办。</string>
-    <string name="auto_read_on">已开启。识别到候选消息时，会在微信中提示你确认。</string>
+    <string name="auto_read_off">开启后，助手会在已添加的微信会话中提示你确认候选待办。</string>
+    <string name="auto_read_on">已开启。已添加的微信会话出现候选消息时，会提示你确认。</string>
     <string name="auto_read_waiting">请在系统辅助功能中开启「微信待办助手 · 当前聊天读取」。</string>
     <string name="chat_candidate_title">添加这条待办？</string>
     <string name="chat_candidate_add">加入待办</string>
@@ -22,6 +22,10 @@
     <string name="enabled">已开启</string>
     <string name="disabled">未开启</string>
     <string name="open_task_count">我的待办  ·  %1$d 项未完成</string>
+    <string name="daily_tasks">日常待办</string>
+    <string name="work_tasks">工作待办</string>
+    <string name="task_group_count">%1$s  ·  %2$d 项未完成</string>
+    <string name="empty_task_group">暂无待办</string>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#116654</item>

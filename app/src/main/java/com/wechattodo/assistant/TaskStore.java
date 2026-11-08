@@ -62,9 +62,12 @@ final class TaskStore extends SQLiteOpenHelper {
         SQLiteDatabase database = getReadableDatabase();
         for (String body : chat.messages()) {
             String key = fingerprint(chat.title(), body, 0);
+            String original = chat.original(body);
+            String originalKey = original.equals(body) ? key : fingerprint(chat.title(), original, 0);
             try (Cursor seen = database.query("chat_seen", new String[]{"fingerprint"},
-                    "fingerprint = ?", new String[]{key}, null, null, null, "1")) {
-                if (!seen.moveToFirst() && !alreadyInChat(database, chat.title(), body)) {
+                    "fingerprint IN (?, ?)", new String[]{key, originalKey}, null, null, null, "1")) {
+                if (!seen.moveToFirst() && !alreadyInChat(database, chat.title(), body)
+                        && (original.equals(body) || !alreadyInChat(database, chat.title(), original))) {
                     return body;
                 }
             }
@@ -93,14 +96,20 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     Task add(String source, String body, Long due, long messageTime) {
+        return add(source, body, body, due, messageTime);
+    }
+
+    Task add(String source, String original, String body, Long due, long messageTime) {
         long now = System.currentTimeMillis();
-        String fingerprint = fingerprint(source, body, messageTime);
+        String fingerprint = fingerprint(source, original, messageTime);
         long window = messageTime > 0 ? EVENT_RETENTION : REPEAT_WINDOW;
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
         try {
-            if (recentlyReadInChat(database, source, body, now)) {
-                Task updated = due == null ? null : fillChatDeadline(database, source, body, due);
+            String readBody = recentlyReadInChat(database, source, body, now) ? body
+                    : !original.equals(body) && recentlyReadInChat(database, source, original, now) ? original : null;
+            if (readBody != null) {
+                Task updated = due == null ? null : fillChatDeadline(database, source, readBody, due);
                 database.setTransactionSuccessful();
                 return updated;
             }

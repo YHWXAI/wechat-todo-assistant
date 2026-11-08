@@ -5,17 +5,32 @@ import android.view.accessibility.AccessibilityNodeInfo;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
-record VisibleWeChatChat(String title, List<String> messages) {
+import com.wechattodo.assistant.MonitoringRules.App;
+import com.wechattodo.assistant.MonitoringRules.Channel;
+
+record VisibleWeChatChat(String title, List<String> messages, Map<String, String> originals) {
     private static final int MAX_NODES = 450;
     private static final int MAX_MESSAGES = 20;
 
     private record Title(String text, int bottom) {}
     private record Composer(int top, boolean hasChatControls) {}
 
-    static VisibleWeChatChat read(AccessibilityNodeInfo root) {
+    VisibleWeChatChat(String title, List<String> messages) {
+        this(title, messages, Map.of());
+    }
+
+    String original(String message) {
+        return originals.getOrDefault(message, message);
+    }
+
+    static VisibleWeChatChat read(AccessibilityNodeInfo root, MonitoringSettings settings) {
+        if (!settings.enabled(App.WECHAT)) return null;
         if (root == null || !WeChatListener.WECHAT.equals(String.valueOf(root.getPackageName()))) {
             return null;
         }
@@ -29,20 +44,24 @@ record VisibleWeChatChat(String title, List<String> messages) {
             return null;
         }
         AccessibilityNodeInfo chatList = messageList(nodes, screen, composer.top());
+        List<AccessibilityNodeInfo> candidates = chatList == null ? nodes : visibleNodes(chatList);
         int titleLimit = screen.top + screen.height() / 6;
         if (chatList != null && bounds(chatList).top > screen.top + screen.height() / 12) {
             titleLimit = Math.min(titleLimit, bounds(chatList).top);
         }
-        Title title = chatTitle(nodes, screen, titleLimit);
+        // Chat bubbles near the top are still messages, even when the list overlaps the header area.
+        Set<AccessibilityNodeInfo> messageNodes = chatList == null ? Set.of() : new HashSet<>(candidates);
+        Title title = chatTitle(nodes, screen, titleLimit, messageNodes);
         if (title == null) {
             return null;
         }
+        Channel channel = MonitoringRules.visible(settings.conversations(App.WECHAT), title.text());
+        if (channel == null) return null;
         Rect messageArea = new Rect(screen.left, title.bottom(), screen.right, composer.top());
         if (chatList != null && !messageArea.intersect(bounds(chatList))) {
             return null;
         }
-        LinkedHashSet<String> messages = new LinkedHashSet<>();
-        List<AccessibilityNodeInfo> candidates = chatList == null ? nodes : visibleNodes(chatList);
+        Map<String, String> messages = new LinkedHashMap<>();
         for (AccessibilityNodeInfo node : candidates) {
             Rect area = bounds(node);
             if (node.isEditable() || node.isPassword() || !messageArea.contains(area)
@@ -53,15 +72,16 @@ record VisibleWeChatChat(String title, List<String> messages) {
             if (text.isEmpty() && node.getChildCount() == 0) {
                 text = WeChatListener.text(node.getContentDescription(), 2000);
             }
-            if (TaskRules.isChatTask(text)
-                    && isIncoming(nodes, area, screen, chatList == null && !composer.hasChatControls())) {
-                messages.add(text);
+            if (!text.isEmpty() && isIncoming(nodes, area, screen, chatList == null && !composer.hasChatControls())) {
+                RecipientRules.Decision decision = channel.route(text);
+                if (decision.action() == RecipientRules.Action.IGNORE) continue;
+                messages.putIfAbsent(decision.text(), text);
                 if (messages.size() == MAX_MESSAGES) {
                     break;
                 }
             }
         }
-        return new VisibleWeChatChat(title.text(), List.copyOf(messages));
+        return new VisibleWeChatChat(channel.title(), List.copyOf(messages.keySet()), Map.copyOf(messages));
     }
 
     private static Composer composer(List<AccessibilityNodeInfo> nodes, Rect screen) {
@@ -118,12 +138,13 @@ record VisibleWeChatChat(String title, List<String> messages) {
         return list;
     }
 
-    private static Title chatTitle(List<AccessibilityNodeInfo> nodes, Rect screen, int limit) {
+    private static Title chatTitle(List<AccessibilityNodeInfo> nodes, Rect screen, int limit,
+                                   Set<AccessibilityNodeInfo> messageNodes) {
         Title title = null;
         int closest = Integer.MAX_VALUE;
         for (AccessibilityNodeInfo node : nodes) {
             Rect area = bounds(node);
-            if (node.isEditable() || node.isPassword() || area.isEmpty() || area.bottom > limit
+            if (messageNodes.contains(node) || node.isEditable() || node.isPassword() || area.isEmpty() || area.bottom > limit
                     || area.top < screen.top || Math.abs(area.centerX() - screen.centerX()) > screen.width() / 5) {
                 continue;
             }
