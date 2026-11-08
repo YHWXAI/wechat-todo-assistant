@@ -67,7 +67,6 @@ public final class MainActivity extends Activity {
     private Tab selectedTab = Tab.HOME;
     private Tab lastTaskTab = Tab.HOME;
     private TextView taskTitle;
-    private TextView taskSubtitle;
     private ScrollView taskScroll;
     private TextView status;
     private Button listenerButton;
@@ -126,12 +125,8 @@ public final class MainActivity extends Activity {
         LinearLayout screen = column();
         screen.setAccessibilityPaneTitle(getText(R.string.app_name));
         LinearLayout header = header(screen);
-        LinearLayout titles = column();
-        header.addView(titles);
         taskTitle = label(getString(R.string.app_name), 28, INK, true);
-        add(titles, taskTitle, 0);
-        taskSubtitle = label(getString(R.string.app_subtitle, BuildConfig.VERSION_NAME), 14, SUBTLE, false);
-        add(titles, taskSubtitle, 4);
+        header.addView(taskTitle);
 
         taskScroll = new ScrollView(this);
         LinearLayout page = scrollBody(screen, taskScroll);
@@ -139,8 +134,6 @@ public final class MainActivity extends Activity {
         add(page, count, 12);
         taskList = column();
         add(page, taskList, 0);
-        add(page, label("识别和保存均在手机上进行。到期提醒可能受系统省电策略延迟。",
-                13, SUBTLE, false), 14);
         return screen;
     }
 
@@ -216,7 +209,6 @@ public final class MainActivity extends Activity {
         int title = tab == Tab.DAILY ? R.string.daily_tasks : tab == Tab.WORK ? R.string.work_tasks : R.string.app_name;
         taskTitle.setText(title);
         taskPage.setAccessibilityPaneTitle(getText(title));
-        taskSubtitle.setVisibility(tab == Tab.HOME ? View.VISIBLE : View.GONE);
         showTasks();
         if (tab != lastTaskTab) taskScroll.scrollTo(0, 0);
         lastTaskTab = tab;
@@ -385,13 +377,11 @@ public final class MainActivity extends Activity {
             int workOpen = showTaskGroup(R.string.work_tasks, work);
             int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
             count.setText(getString(R.string.open_task_count, workOpen + dailyOpen));
-            if (tasks.isEmpty()) {
-                add(taskList, label("点底部的＋添加待办，也可以在「设置」开启通知读取和配置群消息监测。",
-                        14, SUBTLE, false), 16);
-            }
         } else {
             List<TaskStore.Task> visible = selectedTab == Tab.DAILY ? daily : work;
             count.setText(getString(R.string.filtered_task_count, showTaskGroup(0, visible)));
+            add(taskList, label("识别和保存均在手机上进行。到期提醒可能受系统省电策略延迟。",
+                    13, SUBTLE, false), 14);
         }
         refreshCountdowns();
     }
