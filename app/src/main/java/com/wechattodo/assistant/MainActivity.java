@@ -6,6 +6,9 @@ import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -35,7 +38,9 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.time.Instant;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -55,6 +60,7 @@ public final class MainActivity extends Activity {
     private static final String FEATURED_EXPANDED = "featured_expanded";
     private static final String COMPACT_TASKS = "compact_tasks";
     private static final String SORT_BY_DEADLINE = "sort_by_deadline";
+    private static final String LAST_CLIPBOARD_TIMESTAMP = "last_clipboard_timestamp";
     private static final long NO_FEATURED_TASK = -1;
 
     private final BroadcastReceiver changes = new BroadcastReceiver() {
@@ -69,6 +75,7 @@ public final class MainActivity extends Activity {
     private final List<TaskCardView> taskCards = new ArrayList<>();
     private final EnumMap<App, Drawable.ConstantState> sourceIcons = new EnumMap<>(App.class);
     private boolean resumed;
+    private boolean clipboardCheckPending;
     private View taskPage;
     private View settingsPage;
     private BottomNavigation navigation;
@@ -85,9 +92,6 @@ public final class MainActivity extends Activity {
     private Button remindersButton;
     private TextView count;
     private LinearLayout taskList;
-    private TextView chatReaderStatus;
-    private Button chatReaderButton;
-    private Button chatReaderSettings;
     private UpdateController updates;
 
     @Override
@@ -230,15 +234,10 @@ public final class MainActivity extends Activity {
         add(monitoring, button("管理群聊资料", view -> startActivity(
                 new Intent(this, MonitoringActivity.class))), 4);
 
-        LinearLayout reader = card();
-        add(page, reader, 12);
-        add(reader, label("自动识别微信聊天", 17, INK, true), 0);
-        chatReaderStatus = label("", 14, SUBTLE, false);
-        add(reader, chatReaderStatus, 6);
-        chatReaderButton = button("开启自动识别", v -> toggleChatRead());
-        add(reader, chatReaderButton, 4);
-        chatReaderSettings = button("打开无障碍设置", v -> openAccessibilitySettings());
-        add(reader, chatReaderSettings, 0);
+        LinearLayout clipboard = card();
+        add(page, clipboard, 12);
+        add(clipboard, label(getString(R.string.clipboard_title), 17, INK, true), 0);
+        add(clipboard, label(getString(R.string.clipboard_help), 14, SUBTLE, false), 6);
 
         LinearLayout updater = card();
         add(page, updater, 12);
@@ -288,16 +287,18 @@ public final class MainActivity extends Activity {
     private void addManualTask() {
         TaskCategory preferred = selectedTab == Tab.DAILY ? TaskCategory.DAILY
                 : selectedTab == Tab.WORK ? TaskCategory.WORK : null;
-        new ManualTaskDialog(this).show(preferred, entry -> {
-            TaskStore.get(this).addManual(entry.body(), entry.due(), entry.category());
-            Reminders.scheduleNext(this);
-            TaskCategory category = entry.category() == null ? TaskCategory.classify(entry.body(), TaskStore.MANUAL_SOURCE)
-                    : entry.category();
-            Tab taskTab = category == TaskCategory.WORK ? Tab.WORK : Tab.DAILY;
-            if (selectedTab != Tab.HOME && selectedTab != taskTab) selectTab(taskTab);
-            else showTasks();
-            Toast.makeText(this, R.string.manual_saved, Toast.LENGTH_SHORT).show();
-        });
+        new ManualTaskDialog(this).show(preferred, this::saveManualTask);
+    }
+
+    private void saveManualTask(ManualTaskDialog.Entry entry) {
+        TaskStore.get(this).addManual(entry.body(), entry.due(), entry.category());
+        Reminders.scheduleNext(this);
+        TaskCategory category = entry.category() == null ? TaskCategory.classify(entry.body(), TaskStore.MANUAL_SOURCE)
+                : entry.category();
+        Tab taskTab = category == TaskCategory.WORK ? Tab.WORK : Tab.DAILY;
+        if (selectedTab != Tab.HOME && selectedTab != taskTab) selectTab(taskTab);
+        else showTasks();
+        Toast.makeText(this, R.string.manual_saved, Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -327,6 +328,7 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        clipboardCheckPending = true;
         sourceIcons.clear();
         if (selectedTab == Tab.SETTINGS) {
             showPermissions();
@@ -334,6 +336,52 @@ public final class MainActivity extends Activity {
         showTasks();
         Reminders.scheduleNext(this);
         updates.onResume();
+        checkClipboard();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) checkClipboard();
+    }
+
+    private void checkClipboard() {
+        if (!resumed || !clipboardCheckPending || !hasWindowFocus() || isFinishing()) return;
+        clipboardCheckPending = false;
+        ClipboardManager clipboard = getSystemService(ClipboardManager.class);
+        ClipDescription description = clipboard.getPrimaryClipDescription();
+        SharedPreferences preferences = getPreferences(MODE_PRIVATE);
+        if (description == null || description.getTimestamp() <= 0
+                || description.getTimestamp() == preferences.getLong(LAST_CLIPBOARD_TIMESTAMP, 0)
+                || !(description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
+                || description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML))
+                || isSensitive(description)) return;
+
+        ClipData clip = clipboard.getPrimaryClip();
+        if (clip == null || clip.getItemCount() != 1
+                || clip.getDescription().getTimestamp() != description.getTimestamp()
+                || isSensitive(clip.getDescription())) return;
+        preferences.edit().putLong(LAST_CLIPBOARD_TIMESTAMP, description.getTimestamp()).apply();
+        CharSequence text = clip.getItemAt(0).getText();
+        if (text == null || text.length() > ManualTaskDialog.MAX_BODY_LENGTH) return;
+        String body = text.toString().strip();
+        TaskRules.Match task = TaskRules.chatTask(body);
+        if (task == null) return;
+
+        ZonedDateTime copiedAt = Instant.ofEpochMilli(description.getTimestamp()).atZone(ZoneId.systemDefault());
+        Long suggestedDeadline = TaskRules.clipboardDeadline(body, task, copiedAt, System.currentTimeMillis());
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.clipboard_prompt)
+                .setMessage(body)
+                .setNegativeButton(R.string.clipboard_no, null)
+                .setPositiveButton(R.string.clipboard_yes, (dialog, which) -> new ManualTaskDialog(this)
+                        .confirmClipboard(body, suggestedDeadline, this::saveManualTask))
+                .show();
+    }
+
+    private static boolean isSensitive(ClipDescription description) {
+        var extras = description.getExtras();
+        return extras != null && extras.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE);
     }
 
     @Override
@@ -366,16 +414,6 @@ public final class MainActivity extends Activity {
                 getString(reminders ? R.string.enabled : R.string.disabled)));
         listenerButton.setVisibility(listener ? View.GONE : View.VISIBLE);
         remindersButton.setVisibility(reminders ? View.GONE : View.VISIBLE);
-        showChatReaderStatus();
-    }
-
-    private void showChatReaderStatus() {
-        boolean enabled = WeChatChatReader.isEnabled(this);
-        boolean authorized = WeChatChatReader.hasAccess(this);
-        chatReaderStatus.setText(!enabled ? R.string.auto_read_off
-                : authorized ? R.string.auto_read_on : R.string.auto_read_waiting);
-        chatReaderButton.setText(enabled ? R.string.auto_read_stop : R.string.auto_read_start);
-        chatReaderSettings.setVisibility(enabled && !authorized ? View.VISIBLE : View.GONE);
     }
 
     private boolean hasListenerAccess() {
@@ -408,32 +446,6 @@ public final class MainActivity extends Activity {
         } catch (ActivityNotFoundException unavailable) {
             Toast.makeText(this, "请在系统设置中手动开启权限", Toast.LENGTH_LONG).show();
         }
-    }
-
-    private void toggleChatRead() {
-        if (WeChatChatReader.isEnabled(this)) {
-            WeChatChatReader.setEnabled(this, false);
-            showChatReaderStatus();
-            return;
-        }
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.auto_read_start)
-                .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息。"
-                        + "你可以在微信中确认要保存到手机上的待办。"
-                        + "你可以随时在这里关闭自动识别。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("开启", (dialog, which) -> {
-                    WeChatChatReader.setEnabled(this, true);
-                    showChatReaderStatus();
-                    if (!WeChatChatReader.hasAccess(this)) {
-                        openAccessibilitySettings();
-                    }
-                })
-                .show();
-    }
-
-    private void openAccessibilitySettings() {
-        openSettings(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
     }
 
     private void showTasks() {

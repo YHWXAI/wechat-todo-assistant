@@ -8,6 +8,7 @@ import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -22,6 +23,7 @@ import java.time.ZonedDateTime;
 import java.util.function.Consumer;
 
 final class ManualTaskDialog {
+    static final int MAX_BODY_LENGTH = 2000;
     record Entry(String body, Long due, TaskCategory category) {}
 
     private final Activity activity;
@@ -32,15 +34,20 @@ final class ManualTaskDialog {
     }
 
     void show(TaskCategory preferred, Consumer<Entry> onSave) {
-        showForm(null, preferred, onSave);
+        showForm(null, null, preferred, false, R.string.manual_add, R.string.manual_save, onSave);
+    }
+
+    void confirmClipboard(String body, Long deadline, Consumer<Entry> onSave) {
+        showForm(body, deadline, null, false, R.string.clipboard_add, R.string.clipboard_save, onSave);
     }
 
     void edit(TaskStore.Task task, Consumer<Entry> onSave) {
-        showForm(task, task.manualCategory(), onSave);
+        showForm(task.body(), task.due(), task.manualCategory(), true, R.string.edit_task, R.string.manual_save, onSave);
     }
 
-    private void showForm(TaskStore.Task task, TaskCategory preferred, Consumer<Entry> onSave) {
-        due = task == null ? null : task.due();
+    private void showForm(String body, Long deadlineAt, TaskCategory preferred, boolean editing, int title,
+                          int saveLabel, Consumer<Entry> onSave) {
+        due = deadlineAt;
         LinearLayout fields = new LinearLayout(activity);
         fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(20), dp(6), dp(20), dp(8));
@@ -53,11 +60,11 @@ final class ManualTaskDialog {
         input.setGravity(Gravity.TOP | Gravity.START);
         input.setMinLines(2);
         input.setMaxLines(5);
-        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(2000)});
-        if (task != null) input.setText(task.body());
+        input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(MAX_BODY_LENGTH)});
+        input.setText(body);
         add(fields, input, 0);
 
-        Spinner categories = task == null ? categoryPicker(fields, preferred) : null;
+        Spinner categories = editing ? null : categoryPicker(fields, preferred);
 
         Button deadline = button(R.string.manual_deadline);
         Button clear = button(R.string.manual_deadline_clear);
@@ -70,11 +77,14 @@ final class ManualTaskDialog {
         add(fields, deadline, 8);
         add(fields, clear, 0);
 
-        AlertDialog dialog = new AlertDialog.Builder(activity).setTitle(task == null ? R.string.manual_add : R.string.edit_task)
-                .setView(scroll).setNegativeButton(R.string.cancel, null).setPositiveButton(R.string.manual_save, null).create();
+        AlertDialog dialog = new AlertDialog.Builder(activity).setTitle(title)
+                .setView(scroll).setNegativeButton(R.string.cancel, null).setPositiveButton(saveLabel, null).create();
+        if (title == R.string.clipboard_add) {
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
+        }
         dialog.setOnShowListener(view -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(save -> {
-            String body = input.getText().toString().strip();
-            if (body.isBlank()) {
+            String editedBody = input.getText().toString().strip();
+            if (editedBody.isBlank()) {
                 input.setError(activity.getString(R.string.manual_empty_error));
                 input.requestFocus();
                 return;
@@ -84,7 +94,7 @@ final class ManualTaskDialog {
                 case 2 -> TaskCategory.WORK;
                 default -> null;
             };
-            onSave.accept(new Entry(body, due, category));
+            onSave.accept(new Entry(editedBody, due, category));
             dialog.dismiss();
         }));
         dialog.show();

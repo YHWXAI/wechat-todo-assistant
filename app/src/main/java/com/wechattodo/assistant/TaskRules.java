@@ -125,7 +125,6 @@ final class TaskRules {
     private static final Pattern SCOPED_YEAR_DATE = Pattern.compile(
             "(今|明|后)年(" + DAY_NUMBER + ")月(" + DAY_NUMBER + ")[日号]");
     private static final Pattern SHORT_DATE = Pattern.compile("(?<![\\d/.])(\\d{1,2})(?:/|[.-](?=\\d{1,2}\\s*(?:上午|下午|傍晚|早上|中午|晚上|凌晨|[0-9]{1,2}:[0-9]{2})))(\\d{1,2})(?![\\d/.]|\\s*(?:英寸|公分|厘米|毫米|寸|份|件|米|元|公斤|斤|成|倍|名|人|页|张))");
-    private static final Pattern FULL_CHINESE_DATE = Pattern.compile("\\d{4}年\\d{1,2}月\\d{1,2}[日号]");
     private static final Pattern WEEKDAY = Pattern.compile("(?:每(?:个)?|(?:(本|这|下下|下|上)(?:个)?)?)(?:周|星期|礼拜)([一二三四五六日天1-7])");
     private static final Pattern LAST_WORKDAY = Pattern.compile("(?:本|这|下)(?:个)?月最后(?:一|1)个工作日");
     private static final Pattern MONTH_END = Pattern.compile("(?:(?:本|这|下)(?:个)?月(?:底|末|最后一天)|月底|月末)");
@@ -269,6 +268,7 @@ final class TaskRules {
                     + HOUR + ")(?::([0-9]{2})(?![0-9])|[点时](?:(半|一刻|三刻)|("
                     + HOUR + ")分|([0-9]{2}|[零〇][一二三四五六七八九]|[一二三四五]?十[一二三四五六七八九]?)"
                     + "(?![0-9零〇一二两三四五六七八九十号楼栋座线份件个元米]))?(?:整(?!理|改|修|顿|合)|钟(?!头))?(?:差(" + CLOCK_OFFSET + "))?)");
+    private static final Pattern NEAR_FUTURE_CLOCK = Pattern.compile("(?:等会儿?|待会儿?|过会儿?|一会儿?|稍后)\\s*$");
     private static final String TIME_RANGE = TIME.pattern() + "\\s*(?:到|至|[-~])\\s*" + TIME.pattern();
     private static final String CALENDAR_DATE =
             LAST_WORKDAY.pattern() + "|" + SCOPED_YEAR_DATE.pattern() + "|" + SCOPED_MONTH_DAY.pattern() + "|" + NUMERIC_DATE.pattern()
@@ -316,7 +316,7 @@ final class TaskRules {
 
     record Match(String clause, String trailingTime) {
         Long dueAt(ZonedDateTime reference) {
-            return deadline(this, reference, false);
+            return deadline(this, reference);
         }
     }
 
@@ -331,7 +331,11 @@ final class TaskRules {
     }
 
     static boolean isChatTask(String message) {
-        return assess(message, true).match() != null;
+        return chatTask(message) != null;
+    }
+
+    static Match chatTask(String message) {
+        return assess(message, true).match();
     }
 
     static List<String> independentlyScheduledTasks(String message) {
@@ -796,16 +800,15 @@ final class TaskRules {
                 || (chat && (addressed || BARE_CHORE.matcher(content).matches() || CHAT_IMPERATIVE.matcher(content).find()))));
     }
 
-    static Long dueFromChat(String message, ZonedDateTime scanned) {
-        Match match = assess(message, true).match();
-        if (match == null) {
+    static Long clipboardDeadline(String message, Match task, ZonedDateTime copiedAt, long now) {
+        if (needsTimingConfirmation(message, task) || independentlyScheduledTasks(message).size() > 1) {
             return null;
         }
-        Long due = deadline(match, scanned, true);
-        return due != null && due > scanned.toInstant().toEpochMilli() ? due : null;
+        Long due = task.dueAt(copiedAt);
+        return due != null && due > now ? due : null;
     }
 
-    private static Long deadline(Match match, ZonedDateTime reference, boolean absoluteOnly) {
+    private static Long deadline(Match match, ZonedDateTime reference) {
         String instruction = CONDITION.matcher(match.clause()).replaceFirst("");
         String task = WEEKDAY.matcher(DATE_REFERENCE.matcher(instruction).replaceAll(" ")).replaceAll("$0 ");
         String trailing = match.trailingTime();
@@ -836,20 +839,18 @@ final class TaskRules {
             String period = statedPeriod.matches() ? statedPeriod.group(1) : null;
             if (numeric.find()) {
                 date = dateFrom(numeric, date);
-            } else if (!absoluteOnly && yearDate.find()) {
+            } else if (yearDate.find()) {
                 int offset = switch (yearDate.group(1)) {
                     case "明" -> 1;
                     case "后" -> 2;
                     default -> 0;
                 };
                 date = LocalDate.of(date.getYear() + offset, number(yearDate.group(2)), number(yearDate.group(3)));
-            } else if (!absoluteOnly && monthDay.find()) {
+            } else if (monthDay.find()) {
                 YearMonth month = YearMonth.from(date).plusMonths(monthDay.group(1).equals("下") ? 1 : 0);
                 date = month.atDay(number(monthDay.group(2)));
-            } else if (chinese.find() && (!absoluteOnly || FULL_CHINESE_DATE.matcher(chinese.group()).matches())) {
+            } else if (chinese.find()) {
                 date = dateFrom(chinese, date);
-            } else if (absoluteOnly) {
-                return null;
             } else if (shortDate.find()) {
                 date = nextMonthDay(date, Integer.parseInt(shortDate.group(1)), Integer.parseInt(shortDate.group(2)));
             } else if (duration != null) {
@@ -900,14 +901,24 @@ final class TaskRules {
                 }
             }
             LocalDateTime due = dateTimeFrom(date, clockText, period);
-            // A same-day bare hour with a cutoff can mean afternoon if its morning reading has passed.
             Matcher clock = TIME.matcher(clockText);
-            if (!absoluteOnly && period == null && date.equals(reference.toLocalDate()) && dateText.contains("今天")
-                    && clock.find() && clock.group(1) == null && clock.group(3) == null
-                    && clockText.substring(clock.end()).matches("(?:之|以)?前.*")
-                    && due.getHour() >= 1 && due.getHour() < 12 && due.isBefore(reference.toLocalDateTime())
-                    && due.plusHours(12).isAfter(reference.toLocalDateTime())) {
-                due = due.plusHours(12);
+            if (period == null && date.equals(reference.toLocalDate())
+                    && clock.find() && clock.group(1) == null) {
+                int hour = number(clock.group(2));
+                if (!hasDate(dateText) && hour >= 1 && hour <= 12
+                        && (clock.group(3) == null || clock.group(2).length() == 1)
+                        && NEAR_FUTURE_CLOCK.matcher(clockText.substring(0, clock.start())).find()) {
+                    // A near-future cue resolves an otherwise ambiguous 12-hour clock.
+                    LocalDateTime receivedMinute = reference.toLocalDateTime().withSecond(0).withNano(0);
+                    if (hour == 12) due = due.minusHours(12);
+                    while (due.isBefore(receivedMinute)) due = due.plusHours(12);
+                } else if (dateText.contains("今天") && clock.group(3) == null
+                        && clockText.substring(clock.end()).matches("(?:之|以)?前.*")
+                        && due.getHour() >= 1 && due.getHour() < 12 && due.isBefore(reference.toLocalDateTime())
+                        && due.plusHours(12).isAfter(reference.toLocalDateTime())) {
+                    // A same-day cutoff can mean afternoon if its morning reading has passed.
+                    due = due.plusHours(12);
+                }
             }
             return due.atZone(reference.getZone()).toInstant().toEpochMilli();
         } catch (DateTimeException | NumberFormatException ignored) {

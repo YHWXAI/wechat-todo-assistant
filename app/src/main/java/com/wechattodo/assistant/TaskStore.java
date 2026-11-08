@@ -10,7 +10,6 @@ import android.database.sqlite.SQLiteOpenHelper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -43,7 +42,7 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     private TaskStore(Context context) {
-        super(context, "tasks.db", null, 6);
+        super(context, "tasks.db", null, 7);
     }
 
     @Override
@@ -53,17 +52,11 @@ final class TaskStore extends SQLiteOpenHelper {
                 + "done INTEGER NOT NULL DEFAULT 0, reminded INTEGER NOT NULL DEFAULT 0, manual_category TEXT, "
                 + "app_package TEXT, sender TEXT, original_body TEXT)");
         database.execSQL("CREATE TABLE seen (fingerprint TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)");
-        createChatHistory(database);
         createNotificationHistory(database);
     }
 
     @Override
     public void onUpgrade(SQLiteDatabase database, int previous, int current) {
-        if (previous < 2) {
-            createChatHistory(database);
-        } else if (previous < 3) {
-            database.execSQL("ALTER TABLE chat_seen ADD COLUMN accepted INTEGER NOT NULL DEFAULT 1");
-        }
         if (previous < 4 && current >= 4) {
             database.execSQL("ALTER TABLE tasks ADD COLUMN manual_category TEXT");
         }
@@ -73,11 +66,10 @@ final class TaskStore extends SQLiteOpenHelper {
             database.execSQL("ALTER TABLE tasks ADD COLUMN original_body TEXT");
         }
         if (previous < 6 && current >= 6) createNotificationHistory(database);
-    }
-
-    private static void createChatHistory(SQLiteDatabase database) {
-        database.execSQL("CREATE TABLE chat_seen (fingerprint TEXT PRIMARY KEY, "
-                + "seen_at INTEGER NOT NULL, accepted INTEGER NOT NULL DEFAULT 1)");
+        if (previous < 7 && current >= 7) {
+            // This table held temporary fingerprints from the former screen reader.
+            database.execSQL("DROP TABLE IF EXISTS chat_seen");
+        }
     }
 
     private static void createNotificationHistory(SQLiteDatabase database) {
@@ -86,48 +78,6 @@ final class TaskStore extends SQLiteOpenHelper {
                 + "structured INTEGER NOT NULL)");
         database.execSQL("CREATE INDEX notification_seen_lookup ON notification_seen "
                 + "(conversation_body, structured, observed_at)");
-    }
-
-    String nextChatCandidate(VisibleWeChatChat chat) {
-        SQLiteDatabase database = getReadableDatabase();
-        for (String body : chat.messages()) {
-            String key = fingerprint(chat.title(), body, 0);
-            String original = chat.original(body);
-            String originalKey = original.equals(body) ? key : fingerprint(chat.title(), original, 0);
-            try (Cursor seen = database.query("chat_seen", new String[]{"fingerprint"},
-                    "fingerprint IN (?, ?)", new String[]{key, originalKey}, null, null, null, "1")) {
-                if (!seen.moveToFirst() && !alreadyInChat(database, chat.title(), body)
-                        && (original.equals(body) || !alreadyInChat(database, chat.title(), original))) {
-                    return body;
-                }
-            }
-        }
-        return null;
-    }
-
-    boolean resolveChatCandidate(String chat, String body, boolean accepted, ZonedDateTime now) {
-        return resolveChatCandidate(chat, body, accepted, now, null);
-    }
-
-    boolean resolveChatCandidate(String chat, String body, boolean accepted, ZonedDateTime now, String sender) {
-        SQLiteDatabase database = getWritableDatabase();
-        database.beginTransaction();
-        try {
-            ContentValues seen = new ContentValues();
-            seen.put("fingerprint", fingerprint(chat, body, 0));
-            seen.put("seen_at", now.toInstant().toEpochMilli());
-            seen.put("accepted", accepted ? 1 : 0);
-            long id = database.insertWithOnConflict("chat_seen", null, seen, SQLiteDatabase.CONFLICT_IGNORE);
-            boolean added = id != -1 && accepted && !alreadyInChat(database, chat, body);
-            if (added) {
-                insertTask(database, chat, body, TaskRules.dueFromChat(body, now), null,
-                        new Origin(MonitoringRules.App.WECHAT.packageName, sender));
-            }
-            database.setTransactionSuccessful();
-            return added;
-        } finally {
-            database.endTransaction();
-        }
     }
 
     Task add(String source, String body, Long due, long messageTime) {
@@ -149,13 +99,6 @@ final class TaskStore extends SQLiteOpenHelper {
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
         try {
-            String readBody = recentlyReadInChat(database, source, body, now) ? body
-                    : !original.equals(body) && recentlyReadInChat(database, source, original, now) ? original : null;
-            if (readBody != null) {
-                Task updated = mergeChatNotification(database, source, readBody, due, origin);
-                database.setTransactionSuccessful();
-                return updated;
-            }
             database.delete("seen", "seen_at < ?", args(now - EVENT_RETENTION));
             try (Cursor seen = database.query("seen", new String[]{"seen_at"},
                     "fingerprint = ? AND seen_at >= ?",
@@ -236,56 +179,6 @@ final class TaskStore extends SQLiteOpenHelper {
             values.put("sender", origin.sender());
         }
         return database.insertOrThrow("tasks", null, values);
-    }
-
-    private boolean recentlyReadInChat(SQLiteDatabase database, String source, String body, long now) {
-        try (Cursor cursor = database.query("chat_seen", new String[]{"fingerprint"},
-                "fingerprint IN (?, ?) AND seen_at >= ? AND accepted = 1",
-                new String[]{fingerprint(source, body, 0), fingerprint(chatName(source), body, 0),
-                        Long.toString(now - REPEAT_WINDOW)}, null, null, null, "1")) {
-            return cursor.moveToFirst();
-        }
-    }
-
-    private Task mergeChatNotification(SQLiteDatabase database, String source, String body, Long due, Origin origin) {
-        try (Cursor cursor = database.query("tasks", COLUMNS,
-                "(body = ? OR original_body = ?) AND (source = ? OR source = ?)",
-                new String[]{body, body, source, chatName(source)}, null, null, "_id DESC", "1")) {
-            if (!cursor.moveToFirst()) {
-                return null;
-            }
-            Task task = read(cursor);
-            ContentValues values = new ContentValues();
-            Long deadline = task.due();
-            if (due != null && deadline == null && task.originalBody() == null && !task.done()) {
-                deadline = due;
-                values.put("due", deadline);
-            }
-            Origin current = task.origin();
-            if (origin != null && (current == null || current.sender() == null && origin.sender() != null)) {
-                current = origin;
-                values.put("app_package", current.packageName());
-                values.put("sender", current.sender());
-            }
-            if (values.size() == 0) return null;
-            database.update("tasks", values, "_id = ?", args(task.id()));
-            return new Task(task.id(), task.source(), task.body(), deadline, task.done(), task.reminded(),
-                    task.manualCategory(), current, task.originalBody());
-        }
-    }
-
-    private static String chatName(String source) {
-        int separator = source.lastIndexOf(" · ");
-        return separator < 0 ? source : source.substring(0, separator);
-    }
-
-    private boolean alreadyInChat(SQLiteDatabase database, String source, String body) {
-        String senderPrefix = source + " · ";
-        try (Cursor cursor = database.query("tasks", new String[]{"_id"},
-                "(body = ? OR original_body = ?) AND (source = ? OR substr(source, 1, length(?)) = ?)",
-                new String[]{body, body, source, senderPrefix, senderPrefix}, null, null, null, "1")) {
-            return cursor.moveToFirst();
-        }
     }
 
     Task nextReminder() {

@@ -17,16 +17,18 @@ class TaskRulesCheck {
             failed++;
         }
     }
-    private static void due(String text, boolean chat, String expected) {
-        due(text, chat, expected, NOW);
+    private static void due(String text, boolean clipboard, String expected) {
+        due(text, clipboard, expected, NOW);
     }
-    private static void due(String text, boolean chat, String expected, ZonedDateTime reference) {
+    private static void due(String text, boolean clipboard, String expected, ZonedDateTime reference) {
         checked++;
-        TaskRules.Match match = TaskRules.notificationTask(text);
-        Long millis = chat ? TaskRules.dueFromChat(text, reference) : match == null ? null : match.dueAt(reference);
+        TaskRules.Match match = clipboard ? TaskRules.chatTask(text) : TaskRules.notificationTask(text);
+        Long millis = match == null ? null : clipboard
+                ? TaskRules.clipboardDeadline(text, match, reference, reference.toInstant().toEpochMilli())
+                : match.dueAt(reference);
         var actual = millis == null ? null : Instant.ofEpochMilli(millis).atZone(reference.getZone()).toLocalDateTime().toString();
         if (!Objects.equals(actual, expected)) {
-            System.err.println("deadline: " + text + " chat=" + chat + " got " + actual + " expected " + expected);
+            System.err.println("deadline: " + text + " clipboard=" + clipboard + " got " + actual + " expected " + expected);
             failed++;
         }
     }
@@ -65,8 +67,8 @@ class TaskRulesCheck {
         due("下周一下午三点交材料", false, "2026-11-09T15:00");
         due("周五下午四点复诊", false, "2026-11-13T16:00");
         due("11月8日早上5点接孩子", false, "2026-11-08T05:00");
-        due("明天早上五点记得做早饭", true, null);
-        due("下周一下午三点交材料", true, null);
+        due("明天早上五点记得做早饭", true, "2026-11-08T05:00");
+        due("下周一下午三点交材料", true, "2026-11-09T15:00");
         due("2026年11月8日早上五点记得做早饭", true, "2026-11-08T05:00");
         due("2026-11-08 05:00做早饭", true, "2026-11-08T05:00");
         due("2026-11-06 05:00做早饭", true, null);
@@ -107,7 +109,7 @@ class TaskRulesCheck {
         due("明天发我报价，下午五点前", false, "2026-11-08T17:00");
         due("发我报价，明天，记得买菜", false, null);
         due("先把报告发给我，明天下午五点再发最终版", false, null);
-        due("一小时后记得看消息", true, null);
+        due("一小时后记得看消息", true, "2026-11-07T23:00");
         due("今天不需要提交旧表，2026年11月8日早上五点记得做早饭", true, "2026-11-08T05:00");
         due("请把周五的报告发给我", false, null);
         due("请把周五上午的报告发给我，明天早上五点前", false, "2026-11-08T05:00");
@@ -125,7 +127,7 @@ class TaskRulesCheck {
         due("请发会议纪要。\r\n截止明天下午五点。", false, "2026-11-08T17:00");
         test("10号去买菜", true, true);
         due("10号去买菜", false, "2026-11-10T18:00");
-        due("10号去买菜", true, null);
+        due("10号去买菜", true, "2026-11-10T18:00");
         due("10号早上五点买菜", false, "2026-12-10T05:00", NOW.withDayOfMonth(11));
         due("7号去买菜", false, "2026-11-07T18:00");
         due("31号去买菜", false, "2026-12-31T18:00");
@@ -222,7 +224,7 @@ class TaskRulesCheck {
         due("明天中午十二点发一下航班信息", false, "2026-11-08T12:00", morning);
         due("本月10号记得买菜", false, "2026-11-10T18:00", morning);
         due("下个月10号前请寄样", false, "2026-12-10T18:00", morning);
-        due("下个月10号前请寄样", true, null, morning);
+        due("下个月10号前请寄样", true, "2026-12-10T18:00", morning);
         due("明年1月5日上午9点去报到", false, "2027-01-05T09:00", morning);
         due("请于11/10下午五点前提交报价", false, "2026-11-10T17:00", morning);
         due("请打印3/5页", false, null, morning);
@@ -232,6 +234,16 @@ class TaskRulesCheck {
         due("请把明天下午三点的会议纪要在今天五点前发我", false, "2026-11-07T17:00", morning);
         due("请把明天下午三点的会议纪要在今天早上五点前发我", false, "2026-11-07T05:00", morning);
         due("请把明天下午三点的会议纪要在今天05:00前发我", false, "2026-11-07T05:00", morning);
+        ZonedDateTime afternoon = ZonedDateTime.parse("2026-11-08T17:06:00+08:00[Asia/Shanghai]");
+        due("等会9点半去买菜", false, "2026-11-08T21:30", afternoon);
+        due("待会儿九点半去取快递", false, "2026-11-08T09:30", afternoon.withHour(8));
+        due("一会儿12点半取快递", false, "2026-11-09T00:30", afternoon.withHour(23));
+        due("稍后1点半给我发文件", false, "2026-11-09T01:30", afternoon.withHour(23));
+        due("等会9:30去买菜", false, "2026-11-08T21:30", afternoon);
+        due("等会09:30去买菜", false, "2026-11-08T09:30", afternoon);
+        due("等会上午9点半去买菜", false, "2026-11-08T09:30", afternoon);
+        due("明天9点半去买菜", false, "2026-11-09T09:30", afternoon);
+        due("等会21点半去买菜", false, "2026-11-08T21:30", afternoon);
         due("请把2026年11月10日上午9点会议的纪要发给我", false, null, morning);
         due("请把上周五下午两点的录音发给我", false, null, morning);
         due("请把测试机2026.11.10版本的截图发给我", false, null, morning);
