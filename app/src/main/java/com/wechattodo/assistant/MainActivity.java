@@ -21,6 +21,7 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
@@ -37,6 +38,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import com.wechattodo.assistant.BottomNavigation.Tab;
+
 public final class MainActivity extends Activity {
     private static final int BACKGROUND = 0xFFF3F7F5;
     private static final int INK = 0xFF17332B;
@@ -44,7 +47,7 @@ public final class MainActivity extends Activity {
     private static final int GREEN = 0xFF116654;
     private static final int OVERDUE = 0xFF9A3424;
     private static final int WHITE = 0xFFFFFFFF;
-    private static final String SETTINGS_OPEN = "settings_open";
+    private static final String SELECTED_TAB = "selected_tab";
     private static final DateTimeFormatter DATE =
             DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE);
 
@@ -54,10 +57,15 @@ public final class MainActivity extends Activity {
             showTasks();
         }
     };
-    private final OnBackInvokedCallback closeSettings = () -> showSettings(false);
-    private View homePage;
+    private final OnBackInvokedCallback returnHome = () -> selectTab(Tab.HOME);
+    private View taskPage;
     private View settingsPage;
-    private boolean settingsOpen;
+    private BottomNavigation navigation;
+    private Tab selectedTab = Tab.HOME;
+    private Tab lastTaskTab = Tab.HOME;
+    private TextView taskTitle;
+    private TextView taskSubtitle;
+    private ScrollView taskScroll;
     private TextView status;
     private Button listenerButton;
     private Button remindersButton;
@@ -71,38 +79,59 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedState) {
         super.onCreate(savedState);
-        FrameLayout root = new FrameLayout(this);
+        LinearLayout root = column();
         root.setBackgroundColor(BACKGROUND);
+        FrameLayout content = new FrameLayout(this);
+        root.addView(content, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        navigation = new BottomNavigation(this, BACKGROUND, this::selectTab, this::addManualTask);
+        LinearLayout.LayoutParams navigationParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, navigation.heightWithInset(0));
+        root.addView(navigation, navigationParams);
         if (Build.VERSION.SDK_INT >= 35) {
             root.setOnApplyWindowInsetsListener((view, insets) -> {
                 Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                view.setPadding(bars.left, bars.top, bars.right, 0);
+                int height = navigation.heightWithInset(bars.bottom);
+                if (navigationParams.height != height) {
+                    navigationParams.height = height;
+                    navigation.setLayoutParams(navigationParams);
+                }
                 return insets;
             });
+        } else {
+            getWindow().setNavigationBarColor(BottomNavigation.BAR_COLOR);
         }
 
-        homePage = createHomePage();
+        taskPage = createTaskPage();
         settingsPage = createSettingsPage();
         settingsPage.setVisibility(View.GONE);
-        root.addView(homePage);
-        root.addView(settingsPage);
+        content.addView(taskPage);
+        content.addView(settingsPage);
         setContentView(root);
-        if (savedState != null && savedState.getBoolean(SETTINGS_OPEN)) {
-            showSettings(true);
+        WindowInsetsController controller = getWindow().getInsetsController();
+        if (controller != null) {
+            controller.setSystemBarsAppearance(0, WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+        }
+        if (savedState != null) {
+            int index = savedState.getInt(SELECTED_TAB);
+            Tab[] tabs = Tab.values();
+            if (index >= 0 && index < tabs.length) selectTab(tabs[index]);
         }
     }
 
-    private View createHomePage() {
+    private View createTaskPage() {
         LinearLayout screen = column();
         screen.setAccessibilityPaneTitle(getText(R.string.app_name));
         LinearLayout header = header(screen);
         LinearLayout titles = column();
-        header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        add(titles, label(getString(R.string.app_name), 28, INK, true), 0);
-        add(titles, label(getString(R.string.app_subtitle, BuildConfig.VERSION_NAME), 14, SUBTLE, false), 4);
-        header.addView(button(getString(R.string.settings_title), view -> showSettings(true)));
+        header.addView(titles);
+        taskTitle = label(getString(R.string.app_name), 28, INK, true);
+        add(titles, taskTitle, 0);
+        taskSubtitle = label(getString(R.string.app_subtitle, BuildConfig.VERSION_NAME), 14, SUBTLE, false);
+        add(titles, taskSubtitle, 4);
 
-        LinearLayout page = scrollBody(screen);
+        taskScroll = new ScrollView(this);
+        LinearLayout page = scrollBody(screen, taskScroll);
         count = label("", 20, INK, true);
         add(page, count, 12);
         taskList = column();
@@ -116,11 +145,10 @@ public final class MainActivity extends Activity {
         LinearLayout screen = column();
         screen.setAccessibilityPaneTitle(getText(R.string.settings_title));
         LinearLayout header = header(screen);
-        header.addView(button(getString(R.string.back_to_tasks), view -> showSettings(false)));
         TextView title = label(getString(R.string.settings_title), 24, INK, true);
         title.setAccessibilityHeading(true);
         header.addView(title);
-        LinearLayout page = scrollBody(screen);
+        LinearLayout page = scrollBody(screen, new ScrollView(this));
 
         LinearLayout permissions = card();
         add(page, permissions, 8);
@@ -159,37 +187,62 @@ public final class MainActivity extends Activity {
         Button install = button("安装已下载的更新", null);
         add(updater, check, 4);
         add(updater, install, 0);
-        updates = new UpdateController(this, updateStatus, check, install, () -> settingsOpen);
+        updates = new UpdateController(this, updateStatus, check, install, () -> selectedTab == Tab.SETTINGS);
         add(updater, button("用浏览器下载", view -> updates.openDownloadPage()), 0);
         return screen;
     }
 
-    private void showSettings(boolean show) {
-        if (settingsOpen == show) {
+    private void selectTab(Tab tab) {
+        if (selectedTab == tab) return;
+        if (selectedTab == Tab.HOME) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, returnHome);
+        } else if (tab == Tab.HOME) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(returnHome);
+        }
+        selectedTab = tab;
+        navigation.select(tab);
+        boolean settings = tab == Tab.SETTINGS;
+        taskPage.setVisibility(settings ? View.GONE : View.VISIBLE);
+        settingsPage.setVisibility(settings ? View.VISIBLE : View.GONE);
+        if (settings) {
+            showPermissions();
             return;
         }
-        settingsOpen = show;
-        homePage.setVisibility(show ? View.GONE : View.VISIBLE);
-        settingsPage.setVisibility(show ? View.VISIBLE : View.GONE);
-        if (show) {
-            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
-                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, closeSettings);
-            showPermissions();
-        } else {
-            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(closeSettings);
-        }
+        int title = tab == Tab.DAILY ? R.string.daily_tasks : tab == Tab.WORK ? R.string.work_tasks : R.string.app_name;
+        taskTitle.setText(title);
+        taskPage.setAccessibilityPaneTitle(getText(title));
+        taskSubtitle.setVisibility(tab == Tab.HOME ? View.VISIBLE : View.GONE);
+        showTasks();
+        if (tab != lastTaskTab) taskScroll.scrollTo(0, 0);
+        lastTaskTab = tab;
+    }
+
+    private void addManualTask() {
+        TaskCategory preferred = selectedTab == Tab.DAILY ? TaskCategory.DAILY
+                : selectedTab == Tab.WORK ? TaskCategory.WORK : null;
+        new ManualTaskDialog(this).show(preferred, entry -> {
+            TaskStore.get(this).addManual(entry.body(), entry.due(), entry.category());
+            Reminders.scheduleNext(this);
+            TaskCategory category = entry.category() == null ? TaskCategory.classify(entry.body(), TaskStore.MANUAL_SOURCE)
+                    : entry.category();
+            Tab taskTab = category == TaskCategory.WORK ? Tab.WORK : Tab.DAILY;
+            if (selectedTab != Tab.HOME && selectedTab != taskTab) selectTab(taskTab);
+            else showTasks();
+            Toast.makeText(this, R.string.manual_saved, Toast.LENGTH_SHORT).show();
+        });
     }
 
     @Override
     protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
-        state.putBoolean(SETTINGS_OPEN, settingsOpen);
+        state.putInt(SELECTED_TAB, selectedTab.ordinal());
     }
 
     @Override
     protected void onDestroy() {
-        if (settingsOpen) {
-            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(closeSettings);
+        if (selectedTab != Tab.HOME) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(returnHome);
         }
         super.onDestroy();
     }
@@ -203,7 +256,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (settingsOpen) {
+        if (selectedTab == Tab.SETTINGS) {
             showPermissions();
         }
         showTasks();
@@ -306,19 +359,25 @@ public final class MainActivity extends Activity {
     }
 
     private void showTasks() {
+        if (selectedTab == Tab.SETTINGS) return;
         List<TaskStore.Task> tasks = TaskStore.get(this).list();
         List<TaskStore.Task> daily = new ArrayList<>();
         List<TaskStore.Task> work = new ArrayList<>();
         for (TaskStore.Task task : tasks) {
-            (TaskCategory.classify(task.body(), task.source()) == TaskCategory.WORK ? work : daily).add(task);
+            (task.category() == TaskCategory.WORK ? work : daily).add(task);
         }
         taskList.removeAllViews();
-        int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
-        int workOpen = showTaskGroup(R.string.work_tasks, work);
-        count.setText(getString(R.string.open_task_count, dailyOpen + workOpen));
-        if (tasks.isEmpty()) {
-            add(taskList, label("在右上角「设置」开启通知读取，并在「消息监测」添加要识别的会话。"
-                    + "\n例如「请明天下午3点发送设计稿」。", 14, SUBTLE, false), 16);
+        if (selectedTab == Tab.HOME) {
+            int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
+            int workOpen = showTaskGroup(R.string.work_tasks, work);
+            count.setText(getString(R.string.open_task_count, dailyOpen + workOpen));
+            if (tasks.isEmpty()) {
+                add(taskList, label("点底部的＋添加待办，也可以在「设置」开启通知读取和消息监测。",
+                        14, SUBTLE, false), 16);
+            }
+        } else {
+            List<TaskStore.Task> visible = selectedTab == Tab.DAILY ? daily : work;
+            count.setText(getString(R.string.filtered_task_count, showTaskGroup(0, visible)));
         }
     }
 
@@ -329,9 +388,11 @@ public final class MainActivity extends Activity {
                 open++;
             }
         }
-        TextView heading = label(getString(R.string.task_group_count, getString(title), open), 17, INK, true);
-        heading.setAccessibilityHeading(true);
-        add(taskList, heading, 14);
+        if (title != 0) {
+            TextView heading = label(getString(R.string.task_group_count, getString(title), open), 17, INK, true);
+            heading.setAccessibilityHeading(true);
+            add(taskList, heading, 14);
+        }
         if (tasks.isEmpty()) {
             add(taskList, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
         }
@@ -352,7 +413,7 @@ public final class MainActivity extends Activity {
 
         Long due = task.due();
         boolean overdue = due != null && !task.done() && due <= System.currentTimeMillis();
-        String detail = due == null ? "未识别到截止时间" : "截止 " + formatDue(due);
+        String detail = due == null ? "无截止时间" : "截止 " + formatDue(due);
         if (task.done()) {
             detail = "已完成  ·  " + detail;
         } else if (overdue) {
@@ -398,8 +459,7 @@ public final class MainActivity extends Activity {
         return header;
     }
 
-    private LinearLayout scrollBody(LinearLayout screen) {
-        ScrollView scroll = new ScrollView(this);
+    private LinearLayout scrollBody(LinearLayout screen, ScrollView scroll) {
         scroll.setFillViewport(true);
         screen.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         LinearLayout page = column();
