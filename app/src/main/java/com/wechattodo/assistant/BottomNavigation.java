@@ -17,7 +17,7 @@ import java.util.EnumMap;
 import java.util.function.Consumer;
 
 final class BottomNavigation extends FrameLayout {
-    static final int BAR_COLOR = 0xFF0C382C;
+    static final int BAR_COLOR = 0xFF292B2E;
     private static final int BAR_OFFSET = 18;
     private static final int ROW_HEIGHT = 60;
     private static final int ACTIVE = 0xFFE2F4A7;
@@ -69,7 +69,7 @@ final class BottomNavigation extends FrameLayout {
         add.setPadding(0, 0, 0, 0);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(0xFF116654);
+        circle.setColor(0xFF3B3E43);
         circle.setStroke(dp(3), surfaceColor);
         add.setBackground(new RippleDrawable(ColorStateList.valueOf(0x38FFFFFF), circle, null));
         add.setElevation(dp(3));
@@ -104,7 +104,7 @@ final class BottomNavigation extends FrameLayout {
         Drawable icon = getContext().getDrawable(tab.icon).mutate();
         icon.setBounds(0, 0, dp(22), dp(22));
         view.setCompoundDrawablesRelative(null, icon, null, null);
-        view.setCompoundDrawablePadding(dp(4));
+        view.setCompoundDrawablePadding(dp(1));
         GradientDrawable mask = new GradientDrawable();
         mask.setColor(0xFFFFFFFF);
         view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x28FFFFFF), null, mask));

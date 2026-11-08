@@ -12,11 +12,13 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
-import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -31,25 +33,21 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.time.Instant;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
-import java.util.Locale;
 
 import com.wechattodo.assistant.BottomNavigation.Tab;
+import com.wechattodo.assistant.MonitoringRules.App;
 
 public final class MainActivity extends Activity {
     private static final int BACKGROUND = 0xFFF3F7F5;
     private static final int INK = 0xFF17332B;
     private static final int SUBTLE = 0xFF475D55;
     private static final int GREEN = 0xFF116654;
-    private static final int OVERDUE = 0xFF9A3424;
     private static final int WHITE = 0xFFFFFFFF;
     private static final String SELECTED_TAB = "selected_tab";
-    private static final DateTimeFormatter DATE =
-            DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE);
 
     private final BroadcastReceiver changes = new BroadcastReceiver() {
         @Override
@@ -58,6 +56,11 @@ public final class MainActivity extends Activity {
         }
     };
     private final OnBackInvokedCallback returnHome = () -> selectTab(Tab.HOME);
+    private final Handler clock = new Handler(Looper.getMainLooper());
+    private final Runnable updateCountdowns = this::refreshCountdowns;
+    private final List<TaskCardView> taskCards = new ArrayList<>();
+    private final EnumMap<App, Drawable.ConstantState> sourceIcons = new EnumMap<>(App.class);
+    private boolean resumed;
     private View taskPage;
     private View settingsPage;
     private BottomNavigation navigation;
@@ -206,6 +209,7 @@ public final class MainActivity extends Activity {
         taskPage.setVisibility(settings ? View.GONE : View.VISIBLE);
         settingsPage.setVisibility(settings ? View.VISIBLE : View.GONE);
         if (settings) {
+            clock.removeCallbacks(updateCountdowns);
             showPermissions();
             return;
         }
@@ -256,12 +260,21 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
+        sourceIcons.clear();
         if (selectedTab == Tab.SETTINGS) {
             showPermissions();
         }
         showTasks();
         Reminders.scheduleNext(this);
         updates.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        resumed = false;
+        clock.removeCallbacks(updateCountdowns);
+        super.onPause();
     }
 
     @Override
@@ -367,6 +380,7 @@ public final class MainActivity extends Activity {
             (task.category() == TaskCategory.WORK ? work : daily).add(task);
         }
         taskList.removeAllViews();
+        taskCards.clear();
         if (selectedTab == Tab.HOME) {
             int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
             int workOpen = showTaskGroup(R.string.work_tasks, work);
@@ -379,6 +393,7 @@ public final class MainActivity extends Activity {
             List<TaskStore.Task> visible = selectedTab == Tab.DAILY ? daily : work;
             count.setText(getString(R.string.filtered_task_count, showTaskGroup(0, visible)));
         }
+        refreshCountdowns();
     }
 
     private int showTaskGroup(int title, List<TaskStore.Task> tasks) {
@@ -397,58 +412,86 @@ public final class MainActivity extends Activity {
             add(taskList, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
         }
         for (TaskStore.Task task : tasks) {
-            add(taskList, taskCard(task), 8);
+            add(taskList, taskCard(task), 10);
         }
         return open;
     }
 
-    private LinearLayout taskCard(TaskStore.Task task) {
-        LinearLayout card = card();
-        add(card, label(task.source(), 13, GREEN, true), 0);
-        TextView body = label(task.body(), 17, INK, false);
-        if (task.done()) {
-            body.setPaintFlags(body.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
-        }
-        add(card, body, 5);
+    private View taskCard(TaskStore.Task task) {
+        TaskCardSource source = TaskCardSource.from(task);
+        TaskCardView card = new TaskCardView(this, task, source, sourceIcon(source.app()));
+        taskCards.add(card);
+        card.setOnClickListener(view -> showTaskDetails(task, source));
+        card.setOnLongClickListener(view -> {
+            new AlertDialog.Builder(this).setItems(new String[]{"编辑", "删除"}, (dialog, option) -> {
+                if (option == 0) editTask(task);
+                else confirmDelete(task);
+            }).show();
+            return true;
+        });
+        return card;
+    }
 
-        Long due = task.due();
-        boolean overdue = due != null && !task.done() && due <= System.currentTimeMillis();
-        String detail = due == null ? "无截止时间" : "截止 " + formatDue(due);
-        if (task.done()) {
-            detail = "已完成  ·  " + detail;
-        } else if (overdue) {
-            detail = "已到期  ·  " + detail;
-        }
-        add(card, label(detail, 13, overdue ? OVERDUE : SUBTLE, false), 7);
+    private void refreshCountdowns() {
+        clock.removeCallbacks(updateCountdowns);
+        if (!resumed || selectedTab == Tab.SETTINGS) return;
+        long now = System.currentTimeMillis();
+        long delay = Long.MAX_VALUE;
+        for (TaskCardView card : taskCards) delay = Math.min(delay, card.refreshTime(now));
+        if (delay != Long.MAX_VALUE) clock.postDelayed(updateCountdowns, delay);
+    }
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setGravity(Gravity.END);
+    private Drawable sourceIcon(App app) {
+        if (app == null) return null;
+        if (!sourceIcons.containsKey(app)) {
+            try {
+                sourceIcons.put(app, getPackageManager().getApplicationIcon(app.packageName).getConstantState());
+            } catch (PackageManager.NameNotFoundException unavailable) {
+                sourceIcons.put(app, null);
+            }
+        }
+        Drawable.ConstantState icon = sourceIcons.get(app);
+        return icon == null ? null : icon.newDrawable(getResources()).mutate();
+    }
+
+    private void showTaskDetails(TaskStore.Task task, TaskCardSource source) {
+        String due = task.due() == null ? "无截止时间" : "截止 " + TaskTime.full(task.due(), ZoneId.systemDefault());
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(source.title())
+                .setMessage(task.body() + "\n\n" + due + (task.done() ? "\n已完成" : ""))
+                .setNegativeButton("关闭", null);
         if (!task.done()) {
-            actions.addView(button("完成", v -> {
+            dialog.setPositiveButton("完成", (view, action) -> {
                 TaskStore.get(this).complete(task.id());
                 afterTaskChanged(task.id());
-            }));
+            });
         }
-        actions.addView(button("删除", v -> new AlertDialog.Builder(this)
+        dialog.show();
+    }
+
+    private void editTask(TaskStore.Task task) {
+        new ManualTaskDialog(this).edit(task, entry -> {
+            if (TaskStore.get(this).edit(task.id(), entry.body(), entry.due())) {
+                afterTaskChanged(task.id());
+                Toast.makeText(this, R.string.edit_task_saved, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void confirmDelete(TaskStore.Task task) {
+        new AlertDialog.Builder(this)
                 .setTitle("删除这项待办？")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("删除", (dialog, which) -> {
                     TaskStore.get(this).delete(task.id());
                     afterTaskChanged(task.id());
                 })
-                .show()));
-        add(card, actions, 4);
-        return card;
+                .show();
     }
 
     private void afterTaskChanged(long id) {
         Reminders.dismiss(this, id);
         Reminders.scheduleNext(this);
         showTasks();
-    }
-
-    private static String formatDue(long time) {
-        return DATE.format(Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()));
     }
 
     private LinearLayout header(LinearLayout screen) {

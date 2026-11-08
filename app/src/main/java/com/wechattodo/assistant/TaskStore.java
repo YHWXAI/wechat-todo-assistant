@@ -13,18 +13,22 @@ import java.security.NoSuchAlgorithmException;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 final class TaskStore extends SQLiteOpenHelper {
     static final String CHANGED = "com.wechattodo.assistant.TASKS_CHANGED";
     static final String MANUAL_SOURCE = "手动添加";
     private static final long REPEAT_WINDOW = 2 * 60_000L;
     private static final long EVENT_RETENTION = 2 * 24 * 60 * 60_000L;
-    private static final String[] COLUMNS = {"_id", "source", "body", "due", "done", "reminded", "manual_category"};
+    private static final String[] COLUMNS = {"_id", "source", "body", "due", "done", "reminded", "manual_category",
+            "app_package", "sender", "original_body"};
     private static final String PENDING = "due IS NOT NULL AND done = 0 AND reminded = 0";
     private static TaskStore instance;
 
+    record Origin(String packageName, String sender) {}
+
     record Task(long id, String source, String body, Long due, boolean done, boolean reminded,
-                TaskCategory manualCategory) {
+                TaskCategory manualCategory, Origin origin, String originalBody) {
         TaskCategory category() {
             return manualCategory == null ? TaskCategory.classify(body, source) : manualCategory;
         }
@@ -38,14 +42,15 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     private TaskStore(Context context) {
-        super(context, "tasks.db", null, 4);
+        super(context, "tasks.db", null, 5);
     }
 
     @Override
     public void onCreate(SQLiteDatabase database) {
         database.execSQL("CREATE TABLE tasks (_id INTEGER PRIMARY KEY AUTOINCREMENT, "
                 + "source TEXT NOT NULL, body TEXT NOT NULL, due INTEGER, "
-                + "done INTEGER NOT NULL DEFAULT 0, reminded INTEGER NOT NULL DEFAULT 0, manual_category TEXT)");
+                + "done INTEGER NOT NULL DEFAULT 0, reminded INTEGER NOT NULL DEFAULT 0, manual_category TEXT, "
+                + "app_package TEXT, sender TEXT, original_body TEXT)");
         database.execSQL("CREATE TABLE seen (fingerprint TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)");
         createChatHistory(database);
     }
@@ -57,8 +62,13 @@ final class TaskStore extends SQLiteOpenHelper {
         } else if (previous < 3) {
             database.execSQL("ALTER TABLE chat_seen ADD COLUMN accepted INTEGER NOT NULL DEFAULT 1");
         }
-        if (previous < 4) {
+        if (previous < 4 && current >= 4) {
             database.execSQL("ALTER TABLE tasks ADD COLUMN manual_category TEXT");
+        }
+        if (previous < 5 && current >= 5) {
+            database.execSQL("ALTER TABLE tasks ADD COLUMN app_package TEXT");
+            database.execSQL("ALTER TABLE tasks ADD COLUMN sender TEXT");
+            database.execSQL("ALTER TABLE tasks ADD COLUMN original_body TEXT");
         }
     }
 
@@ -85,6 +95,10 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     boolean resolveChatCandidate(String chat, String body, boolean accepted, ZonedDateTime now) {
+        return resolveChatCandidate(chat, body, accepted, now, null);
+    }
+
+    boolean resolveChatCandidate(String chat, String body, boolean accepted, ZonedDateTime now, String sender) {
         SQLiteDatabase database = getWritableDatabase();
         database.beginTransaction();
         try {
@@ -95,7 +109,8 @@ final class TaskStore extends SQLiteOpenHelper {
             long id = database.insertWithOnConflict("chat_seen", null, seen, SQLiteDatabase.CONFLICT_IGNORE);
             boolean added = id != -1 && accepted && !alreadyInChat(database, chat, body);
             if (added) {
-                insertTask(database, chat, body, TaskRules.dueFromChat(body, now), null);
+                insertTask(database, chat, body, TaskRules.dueFromChat(body, now), null,
+                        new Origin(MonitoringRules.App.WECHAT.packageName, sender));
             }
             database.setTransactionSuccessful();
             return added;
@@ -109,6 +124,10 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     Task add(String source, String original, String body, Long due, long messageTime) {
+        return add(source, original, body, due, messageTime, null);
+    }
+
+    Task add(String source, String original, String body, Long due, long messageTime, Origin origin) {
         long now = System.currentTimeMillis();
         String fingerprint = fingerprint(source, original, messageTime);
         long window = messageTime > 0 ? EVENT_RETENTION : REPEAT_WINDOW;
@@ -118,7 +137,7 @@ final class TaskStore extends SQLiteOpenHelper {
             String readBody = recentlyReadInChat(database, source, body, now) ? body
                     : !original.equals(body) && recentlyReadInChat(database, source, original, now) ? original : null;
             if (readBody != null) {
-                Task updated = due == null ? null : fillChatDeadline(database, source, readBody, due);
+                Task updated = mergeChatNotification(database, source, readBody, due, origin);
                 database.setTransactionSuccessful();
                 return updated;
             }
@@ -136,9 +155,9 @@ final class TaskStore extends SQLiteOpenHelper {
             seen.put("seen_at", now);
             database.insertWithOnConflict("seen", null, seen, SQLiteDatabase.CONFLICT_REPLACE);
 
-            long id = insertTask(database, source, body, due, null);
+            long id = insertTask(database, source, body, due, null, origin);
             database.setTransactionSuccessful();
-            return new Task(id, source, body, due, false, false, null);
+            return new Task(id, source, body, due, false, false, null, origin, null);
         } finally {
             database.endTransaction();
         }
@@ -147,16 +166,20 @@ final class TaskStore extends SQLiteOpenHelper {
     void addManual(String body, Long due, TaskCategory category) {
         String text = body.strip();
         if (text.isEmpty()) throw new IllegalArgumentException("Empty task");
-        insertTask(getWritableDatabase(), MANUAL_SOURCE, text, due, category);
+        insertTask(getWritableDatabase(), MANUAL_SOURCE, text, due, category, null);
     }
 
     private static long insertTask(SQLiteDatabase database, String source, String body, Long due,
-                                   TaskCategory category) {
+                                   TaskCategory category, Origin origin) {
         ContentValues values = new ContentValues();
         values.put("source", source);
         values.put("body", body);
         values.put("due", due);
         if (category != null) values.put("manual_category", category.name());
+        if (origin != null) {
+            values.put("app_package", origin.packageName());
+            values.put("sender", origin.sender());
+        }
         return database.insertOrThrow("tasks", null, values);
     }
 
@@ -169,18 +192,30 @@ final class TaskStore extends SQLiteOpenHelper {
         }
     }
 
-    private Task fillChatDeadline(SQLiteDatabase database, String source, String body, long due) {
+    private Task mergeChatNotification(SQLiteDatabase database, String source, String body, Long due, Origin origin) {
         try (Cursor cursor = database.query("tasks", COLUMNS,
-                "body = ? AND (source = ? OR source = ?) AND due IS NULL AND done = 0",
-                new String[]{body, source, chatName(source)}, null, null, "_id DESC", "1")) {
+                "(body = ? OR original_body = ?) AND (source = ? OR source = ?)",
+                new String[]{body, body, source, chatName(source)}, null, null, "_id DESC", "1")) {
             if (!cursor.moveToFirst()) {
                 return null;
             }
             Task task = read(cursor);
             ContentValues values = new ContentValues();
-            values.put("due", due);
+            Long deadline = task.due();
+            if (due != null && deadline == null && task.originalBody() == null && !task.done()) {
+                deadline = due;
+                values.put("due", deadline);
+            }
+            Origin current = task.origin();
+            if (origin != null && (current == null || current.sender() == null && origin.sender() != null)) {
+                current = origin;
+                values.put("app_package", current.packageName());
+                values.put("sender", current.sender());
+            }
+            if (values.size() == 0) return null;
             database.update("tasks", values, "_id = ?", args(task.id()));
-            return new Task(task.id(), task.source(), task.body(), due, task.done(), task.reminded(), task.manualCategory());
+            return new Task(task.id(), task.source(), task.body(), deadline, task.done(), task.reminded(),
+                    task.manualCategory(), current, task.originalBody());
         }
     }
 
@@ -192,8 +227,8 @@ final class TaskStore extends SQLiteOpenHelper {
     private boolean alreadyInChat(SQLiteDatabase database, String source, String body) {
         String senderPrefix = source + " · ";
         try (Cursor cursor = database.query("tasks", new String[]{"_id"},
-                "body = ? AND (source = ? OR substr(source, 1, length(?)) = ?)",
-                new String[]{body, source, senderPrefix, senderPrefix}, null, null, null, "1")) {
+                "(body = ? OR original_body = ?) AND (source = ? OR substr(source, 1, length(?)) = ?)",
+                new String[]{body, body, source, senderPrefix, senderPrefix}, null, null, null, "1")) {
             return cursor.moveToFirst();
         }
     }
@@ -242,6 +277,29 @@ final class TaskStore extends SQLiteOpenHelper {
         getWritableDatabase().delete("tasks", "_id = ?", args(id));
     }
 
+    boolean edit(long id, String body, Long due) {
+        String text = body.strip();
+        if (text.isEmpty()) throw new IllegalArgumentException("Empty task");
+        SQLiteDatabase database = getWritableDatabase();
+        database.beginTransaction();
+        try (Cursor cursor = database.query("tasks", COLUMNS, "_id = ?", args(id), null, null, null, "1")) {
+            if (!cursor.moveToFirst()) return false;
+            Task task = read(cursor);
+            boolean deadlineChanged = !Objects.equals(task.due(), due);
+            if (task.body().equals(text) && !deadlineChanged) return false;
+            ContentValues values = new ContentValues();
+            values.put("body", text);
+            values.put("due", due);
+            if (task.originalBody() == null) values.put("original_body", task.body());
+            if (deadlineChanged) values.put("reminded", 0);
+            boolean edited = database.update("tasks", values, "_id = ?", args(id)) == 1;
+            database.setTransactionSuccessful();
+            return edited;
+        } finally {
+            database.endTransaction();
+        }
+    }
+
     static void signalChange(Context context) {
         context.sendBroadcast(new Intent(CHANGED).setPackage(context.getPackageName()));
     }
@@ -250,8 +308,12 @@ final class TaskStore extends SQLiteOpenHelper {
         String storedCategory = cursor.getString(6);
         TaskCategory category = TaskCategory.DAILY.name().equals(storedCategory) ? TaskCategory.DAILY
                 : TaskCategory.WORK.name().equals(storedCategory) ? TaskCategory.WORK : null;
+        String packageName = cursor.getString(7);
+        String sender = cursor.getString(8);
+        Origin origin = packageName == null && sender == null ? null : new Origin(packageName, sender);
         return new Task(cursor.getLong(0), cursor.getString(1), cursor.getString(2),
-                cursor.isNull(3) ? null : cursor.getLong(3), cursor.getInt(4) != 0, cursor.getInt(5) != 0, category);
+                cursor.isNull(3) ? null : cursor.getLong(3), cursor.getInt(4) != 0, cursor.getInt(5) != 0, category,
+                origin, cursor.getString(9));
     }
 
     private static String[] args(long value) {

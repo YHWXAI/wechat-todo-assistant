@@ -18,6 +18,8 @@
     <string name="manual_empty_error">请输入待办内容</string>
     <string name="manual_save">保存</string>
     <string name="manual_saved">已添加待办</string>
+    <string name="edit_task">编辑待办</string>
+    <string name="edit_task_saved">已更新待办</string>
     <string name="cancel">取消</string>
     <string name="update_source">从 GitHub 获取最新发布，无需登录。</string>
     <string name="checking_update">正在检查 GitHub 最新发布…</string>

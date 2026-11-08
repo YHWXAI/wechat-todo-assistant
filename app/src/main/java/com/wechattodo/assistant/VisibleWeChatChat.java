@@ -14,19 +14,24 @@ import java.util.Set;
 import com.wechattodo.assistant.MonitoringRules.App;
 import com.wechattodo.assistant.MonitoringRules.Channel;
 
-record VisibleWeChatChat(String title, List<String> messages, Map<String, String> originals) {
+record VisibleWeChatChat(String title, List<String> messages, Map<String, String> originals, Map<String, String> senders) {
     private static final int MAX_NODES = 450;
     private static final int MAX_MESSAGES = 20;
 
     private record Title(String text, int bottom) {}
     private record Composer(int top, boolean hasChatControls) {}
+    private record Incoming(String sender) {}
 
     VisibleWeChatChat(String title, List<String> messages) {
-        this(title, messages, Map.of());
+        this(title, messages, Map.of(), Map.of());
     }
 
     String original(String message) {
         return originals.getOrDefault(message, message);
+    }
+
+    String sender(String message) {
+        return senders.get(message);
     }
 
     static VisibleWeChatChat read(AccessibilityNodeInfo root, MonitoringSettings settings) {
@@ -62,6 +67,7 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
             return null;
         }
         Map<String, String> messages = new LinkedHashMap<>();
+        Map<String, String> senders = new LinkedHashMap<>();
         for (AccessibilityNodeInfo node : candidates) {
             Rect area = bounds(node);
             if (node.isEditable() || node.isPassword() || !messageArea.contains(area)
@@ -72,16 +78,19 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
             if (text.isEmpty() && node.getChildCount() == 0) {
                 text = WeChatListener.text(node.getContentDescription(), 2000);
             }
-            if (!text.isEmpty() && isIncoming(nodes, area, screen, chatList == null && !composer.hasChatControls())) {
-                RecipientRules.Decision decision = channel.route(text);
-                if (decision.action() == RecipientRules.Action.IGNORE) continue;
-                messages.putIfAbsent(decision.text(), text);
-                if (messages.size() == MAX_MESSAGES) {
-                    break;
-                }
+            if (text.isEmpty()) continue;
+            Incoming incoming = incoming(nodes, area, screen, chatList == null && !composer.hasChatControls());
+            if (incoming == null) continue;
+            RecipientRules.Decision decision = channel.route(text);
+            if (decision.action() == RecipientRules.Action.IGNORE) continue;
+            if (messages.putIfAbsent(decision.text(), text) == null) {
+                String sender = incoming.sender();
+                if (sender == null && channel.kind() == RecipientRules.Context.PRIVATE) sender = channel.title();
+                if (sender != null) senders.put(decision.text(), sender);
             }
+            if (messages.size() == MAX_MESSAGES) break;
         }
-        return new VisibleWeChatChat(channel.title(), List.copyOf(messages.keySet()), Map.copyOf(messages));
+        return new VisibleWeChatChat(channel.title(), List.copyOf(messages.keySet()), Map.copyOf(messages), Map.copyOf(senders));
     }
 
     private static Composer composer(List<AccessibilityNodeInfo> nodes, Rect screen) {
@@ -159,18 +168,19 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
         return title;
     }
 
-    private static boolean isIncoming(
+    private static Incoming incoming(
             List<AccessibilityNodeInfo> nodes, Rect message, Rect screen, boolean requireAvatar) {
         int width = screen.width();
         int leftInset = message.left - screen.left;
         int rightInset = screen.right - message.right;
         if (leftInset < width / 14 || leftInset > width / 3 || rightInset < width / 14) {
-            return false;
+            return null;
         }
 
         for (AccessibilityNodeInfo node : nodes) {
             String role = String.valueOf(node.getClassName());
-            if (!role.endsWith("ImageView") && !String.valueOf(node.getContentDescription()).endsWith("头像")) {
+            String description = WeChatListener.text(node.getContentDescription(), 120);
+            if (!role.endsWith("ImageView") && !description.endsWith("头像")) {
                 continue;
             }
             Rect avatar = bounds(node);
@@ -179,13 +189,16 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
                 continue;
             }
             if (avatar.left >= screen.right - width / 6 && avatar.left >= message.right) {
-                return false;
+                return null;
             }
             if (avatar.right <= screen.left + width / 6 && avatar.right <= message.left) {
-                return true;
+                String name = description.endsWith("头像")
+                        ? description.substring(0, description.length() - (description.endsWith("的头像") ? 3 : 2)).strip() : "";
+                return new Incoming(name.isEmpty() ? null : name);
             }
         }
-        return !requireAvatar && leftInset <= width / 4 && leftInset <= rightInset + width / 25;
+        return !requireAvatar && leftInset <= width / 4 && leftInset <= rightInset + width / 25
+                ? new Incoming(null) : null;
     }
 
     private static List<AccessibilityNodeInfo> visibleNodes(AccessibilityNodeInfo root) {

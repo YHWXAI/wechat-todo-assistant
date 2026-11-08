@@ -197,7 +197,7 @@ public final class WeChatChatReader extends AccessibilityService {
         closePrompt();
         lastScan = null;
         if (selected.isVisibleIn(current) && TaskStore.get(this).resolveChatCandidate(
-                selected.chat(), selected.body(), accepted, ZonedDateTime.now())) {
+                selected.chat(), selected.body(), accepted, ZonedDateTime.now(), current.sender(selected.body()))) {
             Reminders.scheduleNext(this);
             TaskStore.signalChange(this);
             Toast.makeText(this, R.string.chat_candidate_saved, Toast.LENGTH_SHORT).show();

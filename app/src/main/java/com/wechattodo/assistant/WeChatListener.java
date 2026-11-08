@@ -50,7 +50,9 @@ public final class WeChatListener extends NotificationListenerService {
             if (body.isEmpty()) {
                 body = text(extras.getCharSequence(Notification.EXTRA_BIG_TEXT), 2000);
             }
-            changed = capture(app, channel, channel.title(), body, posted.getPostTime(), 0);
+            String sender = channel.kind() == RecipientRules.Context.PRIVATE && !channel.title().isEmpty()
+                    ? channel.title() : null;
+            changed = capture(app, channel, channel.title(), sender, body, posted.getPostTime(), 0);
         }
         if (changed) {
             Reminders.scheduleNext(this);
@@ -84,10 +86,11 @@ public final class WeChatListener extends NotificationListenerService {
                 ? sender : channel.title() + " · " + sender;
         String body = text(message.getText(), 2000);
         long received = timestamp > 0 && timestamp <= postTime ? timestamp : postTime;
-        return capture(app, channel, source, body, received, timestamp);
+        return capture(app, channel, source, sender, body, received, timestamp);
     }
 
-    private boolean capture(App app, Channel channel, String source, String body, long received, long messageTime) {
+    private boolean capture(App app, Channel channel, String source, String sender, String body,
+                            long received, long messageTime) {
         RecipientRules.Decision decision = channel.route(body);
         if (decision.action() != RecipientRules.Action.AUTO) return false;
         TaskRules.Match task = TaskRules.notificationTask(decision.text());
@@ -96,7 +99,8 @@ public final class WeChatListener extends NotificationListenerService {
         }
         Long due = task.dueAt(Instant.ofEpochMilli(received).atZone(ZoneId.systemDefault()));
         String label = source.isEmpty() ? app.label : app == App.WECHAT ? source : app.label + " · " + source;
-        return TaskStore.get(this).add(label, body, decision.text(), due, messageTime) != null;
+        return TaskStore.get(this).add(label, body, decision.text(), due, messageTime,
+                new TaskStore.Origin(app.packageName, sender)) != null;
     }
 
     static String text(CharSequence value, int limit) {
