@@ -3,13 +3,13 @@ package com.wechattodo.assistant;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -36,7 +36,9 @@ final class BottomNavigation extends FrameLayout {
         }
     }
 
-    private final EnumMap<Tab, TextView> tabs = new EnumMap<>(Tab.class);
+    private record TabItem(LinearLayout target, ImageView icon, TextView caption) {}
+
+    private final EnumMap<Tab, TabItem> tabs = new EnumMap<>(Tab.class);
 
     BottomNavigation(Context context, int surfaceColor, Consumer<Tab> onTab, Runnable onAdd) {
         super(context);
@@ -65,7 +67,7 @@ final class BottomNavigation extends FrameLayout {
         add.setContentDescription(context.getText(R.string.manual_add));
         add.setImageResource(R.drawable.ic_nav_add);
         add.setImageTintList(ColorStateList.valueOf(0xFFFFFFFF));
-        add.setScaleType(android.widget.ImageView.ScaleType.CENTER);
+        add.setScaleType(ImageView.ScaleType.CENTER);
         add.setPadding(0, 0, 0, 0);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
@@ -84,33 +86,48 @@ final class BottomNavigation extends FrameLayout {
     }
 
     void select(Tab selected) {
-        tabs.forEach((tab, view) -> {
+        tabs.forEach((tab, item) -> {
             boolean active = tab == selected;
             int tint = active ? ACTIVE : INACTIVE;
-            view.setSelected(active);
-            view.setTextColor(tint);
-            view.setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
-            view.setCompoundDrawableTintList(ColorStateList.valueOf(tint));
+            item.target().setSelected(active);
+            item.icon().setImageTintList(ColorStateList.valueOf(tint));
+            item.caption().setTextColor(tint);
+            item.caption().setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
         });
     }
 
     private void addTab(LinearLayout row, Tab tab, Consumer<Tab> onTab) {
-        TextView view = new TextView(getContext());
-        view.setGravity(Gravity.CENTER);
-        view.setText(tab.label);
-        view.setTextSize(12);
-        view.setMaxLines(1);
-        view.setFocusable(true);
-        Drawable icon = getContext().getDrawable(tab.icon).mutate();
-        icon.setBounds(0, 0, dp(22), dp(22));
-        view.setCompoundDrawablesRelative(null, icon, null, null);
-        view.setCompoundDrawablePadding(dp(1));
+        Context context = getContext();
+        LinearLayout target = new LinearLayout(context);
+        target.setOrientation(LinearLayout.VERTICAL);
+        target.setGravity(Gravity.CENTER);
+        target.setContentDescription(context.getText(tab.label));
+        target.setFocusable(true);
         GradientDrawable mask = new GradientDrawable();
         mask.setColor(0xFFFFFFFF);
-        view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x28FFFFFF), null, mask));
-        view.setOnClickListener(button -> onTab.accept(tab));
-        tabs.put(tab, view);
-        row.addView(view, slot());
+        target.setBackground(new RippleDrawable(ColorStateList.valueOf(0x28FFFFFF), null, mask));
+        target.setOnClickListener(button -> onTab.accept(tab));
+
+        ImageView icon = new ImageView(context);
+        icon.setImageResource(tab.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        int iconSize = dp(22);
+        target.addView(icon, new LinearLayout.LayoutParams(iconSize, iconSize));
+
+        TextView caption = new TextView(context);
+        caption.setText(tab.label);
+        caption.setTextSize(12);
+        caption.setMaxLines(1);
+        caption.setGravity(Gravity.CENTER);
+        caption.setIncludeFontPadding(false);
+        caption.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+        captionParams.topMargin = dp(1);
+        target.addView(caption, captionParams);
+
+        tabs.put(tab, new TabItem(target, icon, caption));
+        row.addView(target, slot());
     }
 
     private static LinearLayout.LayoutParams slot() {
