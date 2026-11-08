@@ -48,14 +48,15 @@ final class MonitoringRules {
         return value == null ? "" : Normalizer.normalize(value, Normalizer.Form.NFKC).replace('\u200b', ' ').strip();
     }
 
-    static Channel notification(List<Conversation> configured, String conversation, String title, Boolean group) {
+    static Channel notification(List<Conversation> configured, boolean groupsEnabled,
+                                String conversation, String title, Boolean group) {
         String name = normalize(conversation);
         // Prefer the structured conversation name. The title can instead contain a sender or a summary.
         if (name.isEmpty()) name = normalize(title);
         Conversation match = find(configured, name);
         if (match != null) {
             if (Boolean.TRUE.equals(group) && !match.group()) return null;
-            return channel(match);
+            return channel(match, groupsEnabled);
         }
         if (Boolean.FALSE.equals(group)) {
             return new Channel(name, RecipientRules.Context.PRIVATE, UNCONFIGURED);
@@ -63,17 +64,17 @@ final class MonitoringRules {
         return null;
     }
 
-    static Channel visible(List<Conversation> configured, String title) {
+    static Channel visible(List<Conversation> configured, boolean groupsEnabled, String title) {
         String name = normalize(title);
         Conversation match = find(configured, name);
-        if (match == null) {
-            String withoutCount = MEMBER_COUNT.matcher(name).replaceFirst("").strip();
-            if (!withoutCount.equals(name)) {
-                Conversation group = find(configured, withoutCount);
-                if (group != null && group.group()) match = group;
-            }
+        if (match != null) return channel(match, groupsEnabled);
+
+        String withoutCount = MEMBER_COUNT.matcher(name).replaceFirst("").strip();
+        if (!withoutCount.equals(name)) {
+            Conversation group = find(configured, withoutCount);
+            return group != null && group.group() ? channel(group, groupsEnabled) : null;
         }
-        return match == null ? null : channel(match);
+        return null;
     }
 
     private static Conversation find(List<Conversation> configured, String name) {
@@ -81,7 +82,8 @@ final class MonitoringRules {
         return null;
     }
 
-    private static Channel channel(Conversation conversation) {
+    private static Channel channel(Conversation conversation, boolean groupsEnabled) {
+        if (conversation.group() && !groupsEnabled) return null;
         Set<String> aliases = conversation.aliases();
         RecipientRules recipients = aliases.isEmpty() ? UNCONFIGURED
                 : new RecipientRules(aliases, conversation.sharedAlias() ? aliases : Set.of());

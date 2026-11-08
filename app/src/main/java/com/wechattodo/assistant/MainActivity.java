@@ -166,9 +166,9 @@ public final class MainActivity extends Activity {
 
         LinearLayout monitoring = card();
         add(page, monitoring, 12);
-        add(monitoring, label("消息监测", 17, INK, true), 0);
-        add(monitoring, label("选择通讯应用，添加要监测的群，并填写你在群里的昵称。", 14, SUBTLE, false), 6);
-        add(monitoring, button("管理监测应用与会话", view -> startActivity(
+        add(monitoring, label(getString(R.string.group_monitoring), 17, INK, true), 0);
+        add(monitoring, label("添加要监测的群和你在群里的昵称，帮助识别群里发给你的待办。", 14, SUBTLE, false), 6);
+        add(monitoring, button("管理监测群聊", view -> startActivity(
                 new Intent(this, MonitoringActivity.class))), 4);
 
         LinearLayout reader = card();
@@ -354,7 +354,7 @@ public final class MainActivity extends Activity {
                 .setTitle(R.string.auto_read_start)
                 .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息。"
                         + "你可以在微信中确认要保存到手机上的待办。"
-                        + "请先在「消息监测」添加要识别的微信会话。"
+                        + "要识别群聊，请先在「群消息监测」添加该群。"
                         + "你可以随时在这里关闭自动识别。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("开启", (dialog, which) -> {
@@ -382,11 +382,11 @@ public final class MainActivity extends Activity {
         taskList.removeAllViews();
         taskCards.clear();
         if (selectedTab == Tab.HOME) {
-            int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
             int workOpen = showTaskGroup(R.string.work_tasks, work);
-            count.setText(getString(R.string.open_task_count, dailyOpen + workOpen));
+            int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
+            count.setText(getString(R.string.open_task_count, workOpen + dailyOpen));
             if (tasks.isEmpty()) {
-                add(taskList, label("点底部的＋添加待办，也可以在「设置」开启通知读取和消息监测。",
+                add(taskList, label("点底部的＋添加待办，也可以在「设置」开启通知读取和配置群消息监测。",
                         14, SUBTLE, false), 16);
             }
         } else {
@@ -403,16 +403,19 @@ public final class MainActivity extends Activity {
                 open++;
             }
         }
+        LinearLayout group = taskList;
         if (title != 0) {
+            group = card(10);
             TextView heading = label(getString(R.string.task_group_count, getString(title), open), 17, INK, true);
             heading.setAccessibilityHeading(true);
-            add(taskList, heading, 14);
+            add(group, heading, 0);
+            add(taskList, group, 12);
         }
         if (tasks.isEmpty()) {
-            add(taskList, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
+            add(group, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
         }
         for (TaskStore.Task task : tasks) {
-            add(taskList, taskCard(task), 10);
+            add(group, taskCard(task), 10);
         }
         return open;
     }
@@ -518,8 +521,13 @@ public final class MainActivity extends Activity {
     }
 
     private LinearLayout card() {
+        return card(16);
+    }
+
+    private LinearLayout card(int horizontalPadding) {
         LinearLayout layout = column();
-        layout.setPadding(dp(16), dp(13), dp(16), dp(13));
+        int side = dp(horizontalPadding);
+        layout.setPadding(side, dp(13), side, dp(13));
         GradientDrawable surface = new GradientDrawable();
         surface.setColor(WHITE);
         surface.setCornerRadius(dp(14));

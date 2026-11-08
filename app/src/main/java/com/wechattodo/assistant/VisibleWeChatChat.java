@@ -35,7 +35,6 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
     }
 
     static VisibleWeChatChat read(AccessibilityNodeInfo root, MonitoringSettings settings) {
-        if (!settings.enabled(App.WECHAT)) return null;
         if (root == null || !WeChatListener.WECHAT.equals(String.valueOf(root.getPackageName()))) {
             return null;
         }
@@ -60,7 +59,8 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
         if (title == null) {
             return null;
         }
-        Channel channel = MonitoringRules.visible(settings.conversations(App.WECHAT), title.text());
+        Channel channel = MonitoringRules.visible(settings.conversations(App.WECHAT), settings.groupsEnabled(App.WECHAT),
+                title.text());
         if (channel == null) return null;
         Rect messageArea = new Rect(screen.left, title.bottom(), screen.right, composer.top());
         if (chatList != null && !messageArea.intersect(bounds(chatList))) {

@@ -25,9 +25,6 @@ public final class WeChatListener extends NotificationListenerService {
             return;
         }
         MonitoringSettings settings = new MonitoringSettings(this);
-        if (!settings.enabled(app)) {
-            return;
-        }
         Notification notification = posted.getNotification();
         Bundle extras = notification.extras;
         if (extras == null || (notification.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
@@ -38,7 +35,8 @@ public final class WeChatListener extends NotificationListenerService {
                 extras.getParcelableArray(Notification.EXTRA_MESSAGES, Bundle.class));
         String conversation = text(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE), 120);
         Boolean group = groupEvidence(extras, messages, conversation.isEmpty() ? title : conversation);
-        Channel channel = MonitoringRules.notification(settings.conversations(app), conversation, title, group);
+        Channel channel = MonitoringRules.notification(settings.conversations(app), settings.groupsEnabled(app),
+                conversation, title, group);
         if (channel == null) return;
         boolean changed = false;
         if (!messages.isEmpty()) {
