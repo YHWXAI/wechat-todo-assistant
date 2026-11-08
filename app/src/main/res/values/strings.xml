@@ -43,8 +43,7 @@
     <string name="task_sort_deadline">截止时间</string>
     <string name="daily_tasks">日常待办</string>
     <string name="work_tasks">工作待办</string>
-    <string name="task_group_count">%1$s  ·  %2$d 项未完成</string>
-    <string name="empty_task_group">暂无待办</string>
+    <string name="empty_tasks">暂无待办</string>
     <string name="task_card_collapse">收起</string>
     <string name="task_card_complete">完成</string>
     <string name="task_card_details">查看全文</string>

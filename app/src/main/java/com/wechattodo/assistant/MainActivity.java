@@ -438,17 +438,12 @@ public final class MainActivity extends Activity {
 
     private void showTasks() {
         if (selectedTab == Tab.SETTINGS) return;
-        List<TaskStore.Task> tasks = TaskStore.get(this).list(sortByDeadline);
-        List<TaskStore.Task> daily = new ArrayList<>();
-        List<TaskStore.Task> work = new ArrayList<>();
-        TaskStore.Task featured = null;
-        for (TaskStore.Task task : tasks) {
-            boolean isWork = task.category() == TaskCategory.WORK;
-            (isWork ? work : daily).add(task);
-            if (task.id() == featuredTaskId && (selectedTab == Tab.HOME || isWork == (selectedTab == Tab.WORK))) {
-                featured = task;
-            }
+        List<TaskStore.Task> visible = TaskStore.get(this).list(sortByDeadline);
+        if (selectedTab != Tab.HOME) {
+            TaskCategory category = selectedTab == Tab.WORK ? TaskCategory.WORK : TaskCategory.DAILY;
+            visible = visible.stream().filter(task -> task.category() == category).toList();
         }
+        TaskStore.Task featured = visible.stream().filter(task -> task.id() == featuredTaskId).findFirst().orElse(null);
         taskList.removeAllViews();
         taskCards.clear();
         if (featured != null) {
@@ -457,40 +452,24 @@ public final class MainActivity extends Activity {
             featuredTaskId = NO_FEATURED_TASK;
             featuredExpanded = false;
         }
-        if (selectedTab == Tab.HOME) {
-            int workOpen = showTaskGroup(R.string.work_tasks, work);
-            int dailyOpen = showTaskGroup(R.string.daily_tasks, daily);
-            count.setText(getString(R.string.open_task_count, workOpen + dailyOpen));
-        } else {
-            List<TaskStore.Task> visible = selectedTab == Tab.DAILY ? daily : work;
-            count.setText(getString(R.string.filtered_task_count, showTaskGroup(0, visible)));
+        int open = showTaskList(visible);
+        count.setText(getString(selectedTab == Tab.HOME ? R.string.open_task_count : R.string.filtered_task_count, open));
+        if (selectedTab != Tab.HOME) {
             add(taskList, label("识别和保存均在手机上进行。到期提醒可能受系统省电策略延迟。",
                     13, SUBTLE, false), 14);
         }
         refreshCountdowns();
     }
 
-    private int showTaskGroup(int title, List<TaskStore.Task> tasks) {
-        int open = 0;
-        for (TaskStore.Task task : tasks) {
-            if (!task.done()) {
-                open++;
-            }
-        }
-        LinearLayout group = taskList;
-        if (title != 0) {
-            group = card(10);
-            TextView heading = label(getString(R.string.task_group_count, getString(title), open), 17, INK, true);
-            heading.setAccessibilityHeading(true);
-            add(group, heading, 0);
-            add(taskList, group, 12);
-        }
+    private int showTaskList(List<TaskStore.Task> tasks) {
         if (tasks.isEmpty()) {
-            add(group, label(getString(R.string.empty_task_group), 14, SUBTLE, false), 6);
+            add(taskList, label(getString(R.string.empty_tasks), 14, SUBTLE, false), 6);
         }
+        int open = 0;
         Mode mode = compactTasks ? Mode.COMPACT : Mode.STANDARD;
         for (TaskStore.Task task : tasks) {
-            if (task.id() != featuredTaskId) add(group, taskCard(task, mode), 10);
+            if (!task.done()) open++;
+            if (task.id() != featuredTaskId) add(taskList, taskCard(task, mode), 10);
         }
         return open;
     }
