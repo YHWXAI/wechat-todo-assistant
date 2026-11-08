@@ -34,10 +34,8 @@ public final class WeChatListener extends NotificationListenerService {
         List<Message> messages = Message.getMessagesFromBundleArray(
                 extras.getParcelableArray(Notification.EXTRA_MESSAGES, Bundle.class));
         String conversation = text(extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE), 120);
-        Boolean group = groupEvidence(extras, messages, conversation.isEmpty() ? title : conversation);
-        Channel channel = MonitoringRules.notification(settings.conversations(app), settings.groupsEnabled(app),
-                conversation, title, group);
-        if (channel == null) return;
+        Boolean group = groupEvidence(extras, messages, conversation, title);
+        Channel channel = MonitoringRules.notification(settings.conversations(app), conversation, title, group);
         boolean changed = false;
         if (!messages.isEmpty()) {
             for (Message message : messages) {
@@ -58,16 +56,20 @@ public final class WeChatListener extends NotificationListenerService {
         }
     }
 
-    private static Boolean groupEvidence(Bundle extras, List<Message> messages, String title) {
-        if (!extras.containsKey(Notification.EXTRA_IS_GROUP_CONVERSATION)) return null;
+    private static Boolean groupEvidence(Bundle extras, List<Message> messages, String conversation, String title) {
         if (extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION)) return true;
-        if (title.isEmpty() || messages.isEmpty()) return null;
-        String expected = MonitoringRules.normalize(title);
+        String expected = MonitoringRules.normalize(conversation.isEmpty() ? title : conversation);
+        String firstSender = "";
         for (Message message : messages) {
-            Person sender = message.getSenderPerson();
-            if (sender != null && !expected.equals(MonitoringRules.normalize(text(sender.getName(), 120)))) return null;
+            Person person = message.getSenderPerson();
+            String sender = person == null ? "" : MonitoringRules.normalize(text(person.getName(), 120));
+            if (sender.isEmpty()) continue;
+            if ((!conversation.isEmpty() && !expected.equals(sender))
+                    || (!firstSender.isEmpty() && !firstSender.equals(sender))) return true;
+            firstSender = sender;
         }
-        return false;
+        return !firstSender.isEmpty() && expected.equals(firstSender)
+                && extras.containsKey(Notification.EXTRA_IS_GROUP_CONVERSATION) ? Boolean.FALSE : null;
     }
 
     private boolean captureMessage(App app, Channel channel, Message message, long postTime) {

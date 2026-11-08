@@ -226,8 +226,8 @@ public final class MainActivity extends Activity {
         LinearLayout monitoring = card();
         add(page, monitoring, 12);
         add(monitoring, label(getString(R.string.group_monitoring), 17, INK, true), 0);
-        add(monitoring, label("添加要监测的群和你在群里的昵称，帮助识别群里发给你的待办。", 14, SUBTLE, false), 6);
-        add(monitoring, button("管理监测群聊", view -> startActivity(
+        add(monitoring, label("群名和群昵称可以帮助识别群里发给你的待办。", 14, SUBTLE, false), 6);
+        add(monitoring, button("管理群聊资料", view -> startActivity(
                 new Intent(this, MonitoringActivity.class))), 4);
 
         LinearLayout reader = card();
@@ -420,7 +420,6 @@ public final class MainActivity extends Activity {
                 .setTitle(R.string.auto_read_start)
                 .setMessage("开启后，你打开或滚动微信聊天时，助手会通过无障碍权限识别当前可见的消息。"
                         + "你可以在微信中确认要保存到手机上的待办。"
-                        + "要识别群聊，请先在「群消息监测」添加该群。"
                         + "你可以随时在这里关闭自动识别。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("开启", (dialog, which) -> {

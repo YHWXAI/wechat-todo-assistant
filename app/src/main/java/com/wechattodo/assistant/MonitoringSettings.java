@@ -19,14 +19,6 @@ final class MonitoringSettings {
         preferences = context.getSharedPreferences("message_monitoring", Context.MODE_PRIVATE);
     }
 
-    boolean groupsEnabled(App app) {
-        return preferences.getBoolean("enabled." + app.name(), app == App.WECHAT);
-    }
-
-    void setGroupsEnabled(App app, boolean enabled) {
-        preferences.edit().putBoolean("enabled." + app.name(), enabled).apply();
-    }
-
     List<Conversation> conversations(App app) {
         List<Conversation> result = new ArrayList<>();
         for (String item : preferences.getStringSet(key(app), Set.of())) {

@@ -48,46 +48,31 @@ final class MonitoringRules {
         return value == null ? "" : Normalizer.normalize(value, Normalizer.Form.NFKC).replace('\u200b', ' ').strip();
     }
 
-    static Channel notification(List<Conversation> configured, boolean groupsEnabled,
-                                String conversation, String title, Boolean group) {
+    static Channel notification(List<Conversation> configured, String conversation, String title, Boolean group) {
         String name = normalize(conversation);
         // Prefer the structured conversation name. The title can instead contain a sender or a summary.
         if (name.isEmpty()) name = normalize(title);
-        Conversation match = find(configured, name);
-        if (match != null) {
-            if (Boolean.TRUE.equals(group) && !match.group()) return null;
-            return channel(match, groupsEnabled);
-        }
-        if (Boolean.FALSE.equals(group)) {
-            return new Channel(name, RecipientRules.Context.PRIVATE, UNCONFIGURED);
-        }
-        return null;
+        return channel(configured, name, group);
     }
 
-    static Channel visible(List<Conversation> configured, boolean groupsEnabled, String title) {
-        String name = normalize(title);
-        Conversation match = find(configured, name);
-        if (match != null) return channel(match, groupsEnabled);
+    static Channel visible(List<Conversation> configured, String title) {
+        return channel(configured, normalize(title), null);
+    }
+
+    private static Channel channel(List<Conversation> configured, String name, Boolean group) {
+        if (Boolean.FALSE.equals(group)) return new Channel(name, RecipientRules.Context.PRIVATE, UNCONFIGURED);
 
         String withoutCount = MEMBER_COUNT.matcher(name).replaceFirst("").strip();
-        if (!withoutCount.equals(name)) {
-            Conversation group = find(configured, withoutCount);
-            return group != null && group.group() ? channel(group, groupsEnabled) : null;
+        for (Conversation entry : configured) {
+            if (entry.group() && (entry.title().equals(name) || entry.title().equals(withoutCount))) {
+                Set<String> aliases = entry.aliases();
+                RecipientRules recipients = aliases.isEmpty() ? UNCONFIGURED
+                        : new RecipientRules(aliases, entry.sharedAlias() ? aliases : Set.of());
+                return new Channel(entry.title(), RecipientRules.Context.GROUP, recipients);
+            }
         }
-        return null;
-    }
-
-    private static Conversation find(List<Conversation> configured, String name) {
-        for (Conversation item : configured) if (item.title().equals(name)) return item;
-        return null;
-    }
-
-    private static Channel channel(Conversation conversation, boolean groupsEnabled) {
-        if (conversation.group() && !groupsEnabled) return null;
-        Set<String> aliases = conversation.aliases();
-        RecipientRules recipients = aliases.isEmpty() ? UNCONFIGURED
-                : new RecipientRules(aliases, conversation.sharedAlias() ? aliases : Set.of());
-        return new Channel(conversation.title(), conversation.group() ? RecipientRules.Context.GROUP
-                : RecipientRules.Context.PRIVATE, recipients);
+        boolean groupChat = Boolean.TRUE.equals(group) || !withoutCount.equals(name);
+        return new Channel(groupChat ? withoutCount : name,
+                groupChat ? RecipientRules.Context.GROUP : RecipientRules.Context.PRIVATE, UNCONFIGURED);
     }
 }

@@ -15,7 +15,6 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import android.widget.Switch;
 import android.widget.TextView;
 
 import com.wechattodo.assistant.MonitoringRules.App;
@@ -58,8 +57,8 @@ public final class MonitoringActivity extends Activity {
         LinearLayout page = column();
         page.setPadding(dp(20), 0, dp(20), dp(20));
         scroll.addView(page);
-        add(page, label("这里的开关只控制群消息。开启应用的群监测后，添加要监测的群，群名请与聊天标题一致。"
-                + "填写你在群里的昵称，可帮助判断消息是否发给你。",
+        add(page, label("添加群名和你在群里的昵称，可以帮助助手判断待办发给谁。"
+                + "所有群聊都会参与识别，群名请与聊天标题一致。",
                 14, SUBTLE), 6);
         for (App app : App.values()) add(page, appCard(app), 12);
         setContentView(root);
@@ -73,14 +72,7 @@ public final class MonitoringActivity extends Activity {
         surface.setCornerRadius(dp(14));
         card.setBackground(surface);
 
-        Switch enabled = new Switch(this);
-        enabled.setText(app.label);
-        enabled.setTextColor(INK);
-        enabled.setTextSize(17);
-        enabled.setMinHeight(dp(48));
-        enabled.setChecked(settings.groupsEnabled(app));
-        enabled.setOnCheckedChangeListener((view, checked) -> settings.setGroupsEnabled(app, checked));
-        add(card, enabled, 0);
+        add(card, label(app.label, 17, INK), 4);
         Button manage = button("", null);
         manage.setOnClickListener(view -> manage(app, manage));
         updateManage(app, manage);
@@ -89,7 +81,7 @@ public final class MonitoringActivity extends Activity {
     }
 
     private void updateManage(App app, Button manage) {
-        manage.setText("管理监测群聊（" + groups(app).size() + "）");
+        manage.setText("管理群聊资料（" + groups(app).size() + "）");
         manage.setContentDescription(app.label + " · " + manage.getText());
     }
 
@@ -99,11 +91,11 @@ public final class MonitoringActivity extends Activity {
 
     private void manage(App app, Button button) {
         List<Conversation> entries = groups(app);
-        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(app.label + "监测群聊")
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(app.label + "群聊资料")
                 .setPositiveButton("添加群聊", (view, which) -> edit(app, button, null))
                 .setNegativeButton("关闭", null);
         if (entries.isEmpty()) {
-            dialog.setMessage("还没有添加监测群聊。请使用聊天中显示的群名称。");
+            dialog.setMessage("还没有添加群聊资料。请使用聊天中显示的群名称。");
         } else {
             String[] labels = entries.stream().map(entry -> entry.title()
                     + (entry.aliases().isEmpty() ? "" : "（" + String.join("、", entry.aliases()) + "）")).toArray(String[]::new);
@@ -138,7 +130,7 @@ public final class MonitoringActivity extends Activity {
                 .setView(fields).setNegativeButton("取消", null).setPositiveButton("保存", null);
         if (previous != null) {
             builder.setNeutralButton("移除", (view, which) -> new AlertDialog.Builder(this)
-                    .setTitle("移除此监测群聊？").setMessage(previous.title())
+                    .setTitle("移除这条群聊资料？").setMessage(previous.title())
                     .setNegativeButton("取消", null).setPositiveButton("移除", (confirm, action) -> {
                         settings.save(app, previous, null);
                         updateManage(app, button);
@@ -153,9 +145,9 @@ public final class MonitoringActivity extends Activity {
                 return;
             }
             if (previous == null || !previous.title().equals(name)) {
-                for (Conversation item : settings.conversations(app)) {
+                for (Conversation item : groups(app)) {
                     if (!item.title().equals(name)) continue;
-                    title.setError(item.group() ? "此群聊已添加，请返回列表编辑" : "群名与已有私聊同名，请区分名称后再添加");
+                    title.setError("此群聊已添加，请返回列表编辑");
                     return;
                 }
             }

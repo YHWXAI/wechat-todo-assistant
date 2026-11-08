@@ -59,9 +59,7 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
         if (title == null) {
             return null;
         }
-        Channel channel = MonitoringRules.visible(settings.conversations(App.WECHAT), settings.groupsEnabled(App.WECHAT),
-                title.text());
-        if (channel == null) return null;
+        Channel channel = MonitoringRules.visible(settings.conversations(App.WECHAT), title.text());
         Rect messageArea = new Rect(screen.left, title.bottom(), screen.right, composer.top());
         if (chatList != null && !messageArea.intersect(bounds(chatList))) {
             return null;

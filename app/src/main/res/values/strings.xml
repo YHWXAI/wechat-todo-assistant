@@ -23,7 +23,7 @@
     <string name="update_source">从 GitHub 获取最新发布，无需登录。</string>
     <string name="checking_update">正在检查 GitHub 最新发布…</string>
     <string name="downloading_update">正在下载 %1$s…</string>
-    <string name="group_monitoring">群消息监测</string>
+    <string name="group_monitoring">群聊辅助识别</string>
     <string name="auto_read_start">开启自动识别</string>
     <string name="auto_read_stop">关闭自动识别</string>
     <string name="auto_read_off">开启后，助手会读取当前微信聊天中符合规则的消息，并提示你确认待办候选。</string>
