@@ -4,6 +4,8 @@
     <string name="chat_reader_label">微信待办助手 · 当前聊天读取</string>
     <string name="chat_reader_description">从微信当前可见的聊天中识别候选消息，待你确认后在手机上保存待办。</string>
     <string name="app_subtitle">V%1$s  ·  本地整理微信待办</string>
+    <string name="settings_title">设置</string>
+    <string name="back_to_tasks">返回</string>
     <string name="update_source">从 GitHub 获取最新发布，无需登录。</string>
     <string name="checking_update">正在检查 GitHub 最新发布…</string>
     <string name="downloading_update">正在下载 %1$s…</string>

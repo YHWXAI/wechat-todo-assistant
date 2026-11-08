@@ -15,6 +15,7 @@ import android.widget.Toast;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.util.function.BooleanSupplier;
 
 import org.json.JSONException;
 
@@ -23,14 +24,17 @@ final class UpdateController {
     private final TextView status;
     private final Button check;
     private final Button install;
+    private final BooleanSupplier settingsVisible;
     private boolean waitingForPermission;
     private boolean checkedOnStart;
 
-    UpdateController(Activity activity, TextView status, Button check, Button install) {
+    UpdateController(Activity activity, TextView status, Button check, Button install,
+                     BooleanSupplier settingsVisible) {
         this.activity = activity;
         this.status = status;
         this.check = check;
         this.install = install;
+        this.settingsVisible = settingsVisible;
         check.setOnClickListener(view -> check(true));
         install.setOnClickListener(view -> launchInstaller());
         status.setText(R.string.update_source);
@@ -40,7 +44,8 @@ final class UpdateController {
         install.setVisibility(UpdateApkProvider.updateFile(activity).isFile() ? View.VISIBLE : View.GONE);
         if (waitingForPermission) {
             waitingForPermission = false;
-            if (activity.getPackageManager().canRequestPackageInstalls() && install.getVisibility() == View.VISIBLE) {
+            if (settingsVisible.getAsBoolean() && activity.getPackageManager().canRequestPackageInstalls()
+                    && install.getVisibility() == View.VISIBLE) {
                 launchInstaller();
             }
         }
@@ -101,7 +106,7 @@ final class UpdateController {
             if (UpdateApkProvider.updateFile(activity).isFile()) {
                 install.setVisibility(View.VISIBLE);
             }
-            if (downloaded && activity.hasWindowFocus()) {
+            if (downloaded && settingsVisible.getAsBoolean() && activity.hasWindowFocus()) {
                 launchInstaller();
             }
         });

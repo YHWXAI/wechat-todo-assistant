@@ -43,7 +43,10 @@ final class GitHubUpdates {
     record Release(String version, long size, String digest) {}
 
     static Release latest(String repo) throws IOException, JSONException {
-        HttpsURLConnection connection = open(channelFile(repo, "updates.json"));
+        // The version manifest changes in place, while each version's APK has an immutable URL.
+        URI manifest = URI.create(channelFile(repo, "updates.json") + "?check=" + System.currentTimeMillis());
+        HttpsURLConnection connection = open(manifest);
+        connection.setRequestProperty("Cache-Control", "no-cache, no-store, max-age=0");
         try {
             requireSuccess(connection.getResponseCode(), "读取版本信息");
             byte[] json;

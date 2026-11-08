@@ -21,7 +21,10 @@ import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -40,6 +43,7 @@ public final class MainActivity extends Activity {
     private static final int GREEN = 0xFF116654;
     private static final int OVERDUE = 0xFF9A3424;
     private static final int WHITE = 0xFFFFFFFF;
+    private static final String SETTINGS_OPEN = "settings_open";
     private static final DateTimeFormatter DATE =
             DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm", Locale.SIMPLIFIED_CHINESE);
 
@@ -49,6 +53,10 @@ public final class MainActivity extends Activity {
             showTasks();
         }
     };
+    private final OnBackInvokedCallback closeSettings = () -> showSettings(false);
+    private View homePage;
+    private View settingsPage;
+    private boolean settingsOpen;
     private TextView status;
     private Button listenerButton;
     private Button remindersButton;
@@ -62,27 +70,59 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedState) {
         super.onCreate(savedState);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(BACKGROUND);
-        scroll.setFillViewport(true);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(BACKGROUND);
         if (Build.VERSION.SDK_INT >= 35) {
-            scroll.setOnApplyWindowInsetsListener((view, insets) -> {
+            root.setOnApplyWindowInsetsListener((view, insets) -> {
                 Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
                 view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
                 return insets;
             });
         }
 
-        LinearLayout page = column();
-        page.setPadding(dp(20), dp(20), dp(20), dp(20));
-        scroll.addView(page);
-        setContentView(scroll);
+        homePage = createHomePage();
+        settingsPage = createSettingsPage();
+        settingsPage.setVisibility(View.GONE);
+        root.addView(homePage);
+        root.addView(settingsPage);
+        setContentView(root);
+        if (savedState != null && savedState.getBoolean(SETTINGS_OPEN)) {
+            showSettings(true);
+        }
+    }
 
-        add(page, label("微信待办助手", 28, INK, true), 0);
-        add(page, label(getString(R.string.app_subtitle, BuildConfig.VERSION_NAME), 14, SUBTLE, false), 4);
+    private View createHomePage() {
+        LinearLayout screen = column();
+        screen.setAccessibilityPaneTitle(getText(R.string.app_name));
+        LinearLayout header = header(screen);
+        LinearLayout titles = column();
+        header.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        add(titles, label(getString(R.string.app_name), 28, INK, true), 0);
+        add(titles, label(getString(R.string.app_subtitle, BuildConfig.VERSION_NAME), 14, SUBTLE, false), 4);
+        header.addView(button(getString(R.string.settings_title), view -> showSettings(true)));
+
+        LinearLayout page = scrollBody(screen);
+        count = label("", 20, INK, true);
+        add(page, count, 12);
+        taskList = column();
+        add(page, taskList, 0);
+        add(page, label("识别和保存均在手机上进行。到期提醒可能受系统省电策略延迟。",
+                13, SUBTLE, false), 14);
+        return screen;
+    }
+
+    private View createSettingsPage() {
+        LinearLayout screen = column();
+        screen.setAccessibilityPaneTitle(getText(R.string.settings_title));
+        LinearLayout header = header(screen);
+        header.addView(button(getString(R.string.back_to_tasks), view -> showSettings(false)));
+        TextView title = label(getString(R.string.settings_title), 24, INK, true);
+        title.setAccessibilityHeading(true);
+        header.addView(title);
+        LinearLayout page = scrollBody(screen);
 
         LinearLayout permissions = card();
-        add(page, permissions, 20);
+        add(page, permissions, 8);
         add(permissions, label("权限状态", 17, INK, true), 0);
         status = label("", 14, SUBTLE, false);
         add(permissions, status, 6);
@@ -102,15 +142,8 @@ public final class MainActivity extends Activity {
         chatReaderSettings = button("打开无障碍设置", v -> openAccessibilitySettings());
         add(reader, chatReaderSettings, 0);
 
-        count = label("", 20, INK, true);
-        add(page, count, 20);
-        taskList = column();
-        add(page, taskList, 0);
-        add(page, label("识别和保存均在手机上进行。到期提醒可能受系统省电策略延迟。",
-                13, SUBTLE, false), 14);
-
         LinearLayout updater = card();
-        add(page, updater, 16);
+        add(page, updater, 12);
         add(updater, label("应用更新", 17, INK, true), 0);
         TextView updateStatus = label("", 14, SUBTLE, false);
         add(updater, updateStatus, 6);
@@ -118,8 +151,39 @@ public final class MainActivity extends Activity {
         Button install = button("安装已下载的更新", null);
         add(updater, check, 4);
         add(updater, install, 0);
-        updates = new UpdateController(this, updateStatus, check, install);
+        updates = new UpdateController(this, updateStatus, check, install, () -> settingsOpen);
         add(updater, button("用浏览器下载", view -> updates.openDownloadPage()), 0);
+        return screen;
+    }
+
+    private void showSettings(boolean show) {
+        if (settingsOpen == show) {
+            return;
+        }
+        settingsOpen = show;
+        homePage.setVisibility(show ? View.GONE : View.VISIBLE);
+        settingsPage.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT, closeSettings);
+            showPermissions();
+        } else {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(closeSettings);
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putBoolean(SETTINGS_OPEN, settingsOpen);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (settingsOpen) {
+            getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(closeSettings);
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -131,7 +195,9 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        showPermissions();
+        if (settingsOpen) {
+            showPermissions();
+        }
         showTasks();
         Reminders.scheduleNext(this);
         updates.onResume();
@@ -245,7 +311,7 @@ public final class MainActivity extends Activity {
             LinearLayout empty = card();
             add(taskList, empty, 8);
             add(empty, label("暂无待办", 17, INK, true), 0);
-            add(empty, label("开启通知读取后，让微信联系人发来一条会显示通知的消息。"
+            add(empty, label("在右上角「设置」开启通知读取后，让微信联系人发来一条会显示通知的消息。"
                     + "\n例如「请明天下午3点发送设计稿」。", 14, SUBTLE, false), 6);
         }
     }
@@ -297,6 +363,24 @@ public final class MainActivity extends Activity {
 
     private static String formatDue(long time) {
         return DATE.format(Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault()));
+    }
+
+    private LinearLayout header(LinearLayout screen) {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(20), dp(12), dp(20), dp(8));
+        add(screen, header, 0);
+        return header;
+    }
+
+    private LinearLayout scrollBody(LinearLayout screen) {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        screen.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        LinearLayout page = column();
+        page.setPadding(dp(20), 0, dp(20), dp(20));
+        scroll.addView(page);
+        return page;
     }
 
     private LinearLayout column() {
