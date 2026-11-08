@@ -37,6 +37,10 @@ final class MonitoringRules {
         RecipientRules.Decision route(String body) {
             return recipients.evaluate(body, kind);
         }
+
+        List<RecipientRules.Decision> routes(String body) {
+            return recipients.evaluateAll(body, kind);
+        }
     }
 
     private static final Pattern MEMBER_COUNT = Pattern.compile("\\s*\\([0-9]{1,5}\\)$");

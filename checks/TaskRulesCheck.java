@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.Objects;
 
-// Run with JDK 17 by compiling this file and TaskRules.java together, then running this class.
+// Run with JDK 17 by compiling this file, TaskRules.java and EnglishTaskRules.java, then running this class.
 class TaskRulesCheck {
     private static final ZonedDateTime NOW = ZonedDateTime.parse("2026-11-07T22:00:00+08:00[Asia/Shanghai]");
     private static int checked, failed;
@@ -27,6 +27,14 @@ class TaskRulesCheck {
         var actual = millis == null ? null : Instant.ofEpochMilli(millis).atZone(reference.getZone()).toLocalDateTime().toString();
         if (!Objects.equals(actual, expected)) {
             System.err.println("deadline: " + text + " chat=" + chat + " got " + actual + " expected " + expected);
+            failed++;
+        }
+    }
+    private static void split(String text, int expected) {
+        checked++;
+        int actual = TaskRules.independentlyScheduledTasks(text).size();
+        if (actual != expected) {
+            System.err.println("independent tasks: " + text + " got " + actual + " expected " + expected);
             failed++;
         }
     }
@@ -151,6 +159,25 @@ class TaskRulesCheck {
             "下午3点30件衣服要取回来"
         }) test(text, false, false);
         ZonedDateTime morning = NOW.withHour(9);
+        test("水烧好了，你把火关一下，锅还在响。", false, false);
+        test("我替你跑一趟快递站，拿到了给你放门口。", false, false);
+        test("周五记得去换滤芯。算啦，我已经买新机器了。", false, false);
+        due("明早七点差一刻叫醒我，我得赶车。", false, "2026-11-08T06:45", morning);
+        due("三天后下午四点提醒我去复查。", false, "2026-11-10T16:00", morning);
+        due("明天中午前把开票资料发我。", false, "2026-11-08T12:00", morning);
+        due("明天下午四点交稿，哦不，应该是后天下午四点。", false, "2026-11-09T16:00", morning);
+        due("今天先别把围栏寄过来，改到后天下午两点再寄。", false, "2026-11-09T14:00", morning);
+        split("明天九点发盖章件；后天18:30把原件交前台。", 2);
+        split("明天九点发盖章件；算了不用了。", 1);
+        split("原话是：『明天九点发盖章件；后天交原件』。", 1);
+
+        test("先帮我把台灯打开，我这边看不清", false, false);
+        test("今天先别寄合同，改到明早九点再寄。算了，不用了。", false, false);
+        test("明天十点开项目会，会议取消了", false, false);
+        due("今天先别交材料。改成周二14:40再交。", false, "2026-11-10T14:40", morning);
+        due("周四16:20记得去学校接孩子", false, "2026-11-12T16:20", morning);
+        due("周三14:00到15:30开部门会，记得带名单", false, "2026-11-11T14:00", morning);
+        due("麻烦你15号去给猫打疫苗，预约在下午四点", false, "2026-11-15T16:00", morning);
         for (String text : new String[] {
             "今晚七点记得交接，不用了", "明早请给供应商打电话，先别打了", "今晚八点开会。刚通知会议取消了。",
             "你明天去买菜还是我去", "记得那个项目最后没上线",
@@ -170,6 +197,28 @@ class TaskRulesCheck {
         due("今天七点到实验室开会，改到明天九点", false, "2026-11-08T09:00", morning);
         due("请从明天上午9点开始核对，最迟11点发我", false, "2026-11-08T11:00", morning);
         due("今晚十二点记得关灯", false, "2026-11-08T00:00", morning);
+        due("今晚零点前把录音交到群里。", false, "2026-11-08T00:00", morning);
+        due("明早差一刻九点把钥匙交给保安。", false, "2026-11-08T08:45", morning);
+        due("明早差十分钟九点前把除湿机送到值班室。", false, "2026-11-08T08:50", morning);
+        due("周四上午九点二十前买一根3/4英寸软管。", false, "2026-11-12T09:20", morning);
+        due("明年二月十二号下午三点四十五前交搬家签收页。", false, "2027-02-12T15:45", morning);
+        due("明天清早六点一刻把美术材料清单发给我。", false, "2026-11-08T06:15", morning);
+        due("Please file the expense summary on Tuesday at 12 pm.", false, "2026-11-10T12:00", morning);
+        due("Please upload the patch notes at 12 am tomorrow.", false, "2026-11-08T00:00", morning);
+        test("Could you confirm whether the packet was filed on Tuesday at 3 pm?", false, false);
+        test("Please send the test report tomorrow at 9 am. Never mind, it was canceled.", false, false);
+        test("周二上午九点量挡风板的事先撤回，物业刚换了型号。", false, false);
+        due("今晚过零点十五分钟再把菜品图片放到共享盘。", false, "2026-11-08T00:15", morning);
+        due("11.12 18:45前把校对样张印出来。", false, "2026-11-12T18:45", morning);
+        due("两天后的下午五点把交换卡送到二楼。", false, "2026-11-09T17:00", morning);
+        split("明早十点把登记证送到车管所，下午三点把座椅靠垫买了。", 2);
+        test("后天上午八点前把试印海报发过来，这句我只是给你测试语音输入。", false, false);
+        test("离路口还有十二秒，把充电线递过来，我要插上。", false, false);
+        due("你明早十点把图纸送来。等等，改成后天早上九点半送。", false, "2026-11-09T09:30", morning);
+        due("明早十点前\n把过敏记录拍给班主任。", false, "2026-11-08T10:00", morning);
+        test("明晚八点把签到机搬过来。哦等一下，不搬了。", false, false);
+        test("明天把护照寄回去，这句话怎么翻译成日语？", false, false);
+        split("明早七点把收纳盒送到前台。后天下午一点前把备件拿回来。", 2);
         due("明天中午十二点发一下航班信息", false, "2026-11-08T12:00", morning);
         due("本月10号记得买菜", false, "2026-11-10T18:00", morning);
         due("下个月10号前请寄样", false, "2026-12-10T18:00", morning);

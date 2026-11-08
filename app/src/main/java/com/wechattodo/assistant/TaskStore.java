@@ -20,6 +20,7 @@ final class TaskStore extends SQLiteOpenHelper {
     static final String MANUAL_SOURCE = "手动添加";
     private static final long REPEAT_WINDOW = 2 * 60_000L;
     private static final long EVENT_RETENTION = 2 * 24 * 60 * 60_000L;
+    private static final long FORMAT_MATCH_WINDOW = 12_000L;
     private static final String[] COLUMNS = {"_id", "source", "body", "due", "done", "reminded", "manual_category",
             "app_package", "sender", "original_body"};
     private static final String PENDING = "due IS NOT NULL AND done = 0 AND reminded = 0";
@@ -42,7 +43,7 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     private TaskStore(Context context) {
-        super(context, "tasks.db", null, 5);
+        super(context, "tasks.db", null, 6);
     }
 
     @Override
@@ -53,6 +54,7 @@ final class TaskStore extends SQLiteOpenHelper {
                 + "app_package TEXT, sender TEXT, original_body TEXT)");
         database.execSQL("CREATE TABLE seen (fingerprint TEXT PRIMARY KEY, seen_at INTEGER NOT NULL)");
         createChatHistory(database);
+        createNotificationHistory(database);
     }
 
     @Override
@@ -70,11 +72,20 @@ final class TaskStore extends SQLiteOpenHelper {
             database.execSQL("ALTER TABLE tasks ADD COLUMN sender TEXT");
             database.execSQL("ALTER TABLE tasks ADD COLUMN original_body TEXT");
         }
+        if (previous < 6 && current >= 6) createNotificationHistory(database);
     }
 
     private static void createChatHistory(SQLiteDatabase database) {
         database.execSQL("CREATE TABLE chat_seen (fingerprint TEXT PRIMARY KEY, "
                 + "seen_at INTEGER NOT NULL, accepted INTEGER NOT NULL DEFAULT 1)");
+    }
+
+    private static void createNotificationHistory(SQLiteDatabase database) {
+        database.execSQL("CREATE TABLE notification_seen (fingerprint TEXT PRIMARY KEY, "
+                + "conversation_body TEXT NOT NULL, observed_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, "
+                + "structured INTEGER NOT NULL)");
+        database.execSQL("CREATE INDEX notification_seen_lookup ON notification_seen "
+                + "(conversation_body, structured, observed_at)");
     }
 
     String nextChatCandidate(VisibleWeChatChat chat) {
@@ -128,6 +139,10 @@ final class TaskStore extends SQLiteOpenHelper {
     }
 
     Task add(String source, String original, String body, Long due, long messageTime, Origin origin) {
+        return add(source, original, body, due, messageTime, origin, 0);
+    }
+
+    Task add(String source, String original, String body, Long due, long messageTime, Origin origin, long observedAt) {
         long now = System.currentTimeMillis();
         String fingerprint = fingerprint(source, original, messageTime);
         long window = messageTime > 0 ? EVENT_RETENTION : REPEAT_WINDOW;
@@ -155,12 +170,52 @@ final class TaskStore extends SQLiteOpenHelper {
             seen.put("seen_at", now);
             database.insertWithOnConflict("seen", null, seen, SQLiteDatabase.CONFLICT_REPLACE);
 
+            if (observedAt > 0 && origin != null && origin.sender() != null && !origin.sender().isBlank()) {
+                String conversation = origin.packageName() + "\n" + source + "\n" + origin.sender();
+                if (matchesOtherFormat(database, fingerprint, fingerprint(conversation, original, 0),
+                        messageTime > 0, observedAt, now)) {
+                    database.setTransactionSuccessful();
+                    return null;
+                }
+            }
             long id = insertTask(database, source, body, due, null, origin);
             database.setTransactionSuccessful();
             return new Task(id, source, body, due, false, false, null, origin, null);
         } finally {
             database.endTransaction();
         }
+    }
+
+    private static boolean matchesOtherFormat(SQLiteDatabase database, String eventKey, String conversationBody,
+                                              boolean structured, long observedAt, long now) {
+        database.delete("notification_seen", "seen_at < ?", args(now - REPEAT_WINDOW));
+        String closest = null;
+        long distance = FORMAT_MATCH_WINDOW + 1;
+        try (Cursor rows = database.query("notification_seen", new String[]{"fingerprint", "observed_at"},
+                "conversation_body = ? AND structured = ? AND observed_at BETWEEN ? AND ?",
+                new String[]{conversationBody, structured ? "0" : "1",
+                        Long.toString(observedAt - FORMAT_MATCH_WINDOW), Long.toString(observedAt + FORMAT_MATCH_WINDOW)},
+                null, null, null)) {
+            while (rows.moveToNext()) {
+                long gap = Math.abs(rows.getLong(1) - observedAt);
+                if (gap >= distance) continue;
+                closest = rows.getString(0);
+                distance = gap;
+            }
+        }
+        if (closest != null) {
+            // Pair each observation once. A second timestamped message can have exactly the same text.
+            database.delete("notification_seen", "fingerprint = ?", new String[]{closest});
+            return true;
+        }
+        ContentValues pending = new ContentValues();
+        pending.put("fingerprint", eventKey);
+        pending.put("conversation_body", conversationBody);
+        pending.put("observed_at", observedAt);
+        pending.put("seen_at", now);
+        pending.put("structured", structured ? 1 : 0);
+        database.insertWithOnConflict("notification_seen", null, pending, SQLiteDatabase.CONFLICT_REPLACE);
+        return false;
     }
 
     void addManual(String body, Long due, TaskCategory category) {

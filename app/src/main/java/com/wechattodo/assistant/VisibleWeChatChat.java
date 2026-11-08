@@ -79,12 +79,17 @@ record VisibleWeChatChat(String title, List<String> messages, Map<String, String
             if (text.isEmpty()) continue;
             Incoming incoming = incoming(nodes, area, screen, chatList == null && !composer.hasChatControls());
             if (incoming == null) continue;
-            RecipientRules.Decision decision = channel.route(text);
-            if (decision.action() == RecipientRules.Action.IGNORE) continue;
-            if (messages.putIfAbsent(decision.text(), text) == null) {
-                String sender = incoming.sender();
-                if (sender == null && channel.kind() == RecipientRules.Context.PRIVATE) sender = channel.title();
-                if (sender != null) senders.put(decision.text(), sender);
+            List<RecipientRules.Decision> decisions = channel.kind() == RecipientRules.Context.PRIVATE
+                    ? TaskRules.independentlyScheduledTasks(text).stream().map(channel::route).toList()
+                    : channel.routes(text);
+            for (var decision : decisions) {
+                if (decision.action() == RecipientRules.Action.IGNORE) continue;
+                if (messages.putIfAbsent(decision.text(), text) == null) {
+                    String sender = incoming.sender();
+                    if (sender == null && channel.kind() == RecipientRules.Context.PRIVATE) sender = channel.title();
+                    if (sender != null) senders.put(decision.text(), sender);
+                }
+                if (messages.size() == MAX_MESSAGES) break;
             }
             if (messages.size() == MAX_MESSAGES) break;
         }
