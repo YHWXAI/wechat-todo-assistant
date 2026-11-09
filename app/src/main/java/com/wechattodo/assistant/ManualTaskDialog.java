@@ -2,17 +2,19 @@ package com.wechattodo.assistant;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.DatePickerDialog;
-import android.app.TimePickerDialog;
+import android.graphics.Color;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CalendarView;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.NumberPicker;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -21,10 +23,15 @@ import android.widget.Toast;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 final class ManualTaskDialog {
     static final int MAX_BODY_LENGTH = 2000;
+    private static final DateTimeFormatter PICKER_DATE =
+            DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.SIMPLIFIED_CHINESE);
     record Entry(String body, Long due, TaskCategory category) {}
 
     private final Activity activity;
@@ -151,15 +158,86 @@ final class ManualTaskDialog {
     }
 
     private void pickDeadline(ZonedDateTime initial, LocalDate minimum, Consumer<Long> onChosen) {
-        DatePickerDialog date = new DatePickerDialog(activity, (picker, year, month, day) -> {
-            LocalDate selected = LocalDate.of(year, month + 1, day);
-            new TimePickerDialog(activity, (time, hour, minute) -> {
-                ZonedDateTime chosen = selected.atTime(hour, minute).atZone(initial.getZone());
-                onChosen.accept(chosen.toInstant().toEpochMilli());
-            }, initial.getHour(), initial.getMinute(), true).show();
-        }, initial.getYear(), initial.getMonthValue() - 1, initial.getDayOfMonth());
-        date.getDatePicker().setMinDate(minimum.atStartOfDay(initial.getZone()).toInstant().toEpochMilli());
-        date.show();
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        ScrollView scroll = new ScrollView(activity);
+        scroll.addView(content);
+
+        TextView dateLabel = new TextView(activity);
+        dateLabel.setText(PICKER_DATE.format(initial));
+        dateLabel.setTextSize(16);
+        dateLabel.setTextColor(Color.WHITE);
+        dateLabel.setBackgroundColor(0xFF116654);
+        dateLabel.setGravity(Gravity.CENTER_VERTICAL);
+        dateLabel.setMinHeight(dp(44));
+        dateLabel.setPadding(dp(16), dp(6), dp(16), dp(6));
+        add(content, dateLabel, 0);
+
+        CalendarView calendar = new CalendarView(activity);
+        calendar.setMinDate(minimum.atStartOfDay(initial.getZone()).toInstant().toEpochMilli());
+        calendar.setDate(initial.toInstant().toEpochMilli(), false, false);
+        AtomicReference<LocalDate> selectedDate = new AtomicReference<>(initial.toLocalDate());
+        calendar.setOnDateChangeListener((view, year, month, day) -> {
+            LocalDate date = LocalDate.of(year, month + 1, day);
+            selectedDate.set(date);
+            dateLabel.setText(PICKER_DATE.format(date));
+        });
+        add(content, calendar, 0);
+
+        NumberPicker hours = wheel(R.string.deadline_hours, 23, initial.getHour());
+        NumberPicker minutes = wheel(R.string.deadline_minutes, 59, initial.getMinute());
+        LinearLayout time = new LinearLayout(activity);
+        time.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM);
+        time.setPadding(0, dp(4), 0, 0);
+        time.addView(wheelColumn(R.string.deadline_hours, hours));
+        TextView colon = new TextView(activity);
+        colon.setText(":");
+        colon.setTextSize(24);
+        colon.setTextColor(0xFF17332B);
+        colon.setGravity(Gravity.CENTER);
+        colon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        time.addView(colon, new LinearLayout.LayoutParams(dp(20), dp(108)));
+        time.addView(wheelColumn(R.string.deadline_minutes, minutes));
+        add(content, time, 0);
+
+        new AlertDialog.Builder(activity).setView(scroll)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    long chosen = selectedDate.get().atTime(hours.getValue(), minutes.getValue())
+                            .atZone(initial.getZone()).toInstant().toEpochMilli();
+                    onChosen.accept(chosen);
+                })
+                .show();
+    }
+
+    private NumberPicker wheel(int label, int maximum, int value) {
+        NumberPicker picker = new NumberPicker(activity);
+        picker.setMinValue(0);
+        picker.setMaxValue(maximum);
+        picker.setFormatter(number -> String.format(Locale.ROOT, "%02d", number));
+        picker.setValue(value);
+        picker.setWrapSelectorWheel(true);
+        picker.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
+        picker.setContentDescription(activity.getText(label));
+        picker.setSelectionDividerHeight(0);
+        picker.setTextColor(0xFF17332B);
+        picker.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 26,
+                activity.getResources().getDisplayMetrics()));
+        return picker;
+    }
+
+    private LinearLayout wheelColumn(int label, NumberPicker picker) {
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView title = new TextView(activity);
+        title.setText(label);
+        title.setTextColor(0xFF475D55);
+        title.setGravity(Gravity.CENTER);
+        title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        add(column, title, 0);
+        column.addView(picker, new LinearLayout.LayoutParams(dp(72), dp(108)));
+        return column;
     }
 
     private Button button(int text) {

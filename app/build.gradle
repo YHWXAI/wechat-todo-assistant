@@ -11,8 +11,8 @@ android {
         applicationId 'com.wechattodo.assistant'
         minSdk 33
         targetSdk 35
-        versionCode 25
-        versionName '0.2.23'
+        versionCode 26
+        versionName '0.2.24'
         buildConfigField 'String', 'UPDATE_REPOSITORY', '"YHWXAI/wechat-todo-assistant"'
     }
 
