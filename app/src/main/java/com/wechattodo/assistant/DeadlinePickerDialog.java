@@ -5,13 +5,12 @@ import android.app.AlertDialog;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
-import android.text.SpannableString;
-import android.text.Spanned;
-import android.text.style.RelativeSizeSpan;
-import android.text.style.StyleSpan;
+import android.graphics.drawable.InsetDrawable;
+import android.util.TypedValue;
 import android.view.Gravity;
-import android.widget.Button;
+import android.view.ViewGroup;
+import android.widget.CalendarView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
 import android.widget.ScrollView;
@@ -19,17 +18,22 @@ import android.widget.TextView;
 
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Calendar;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 final class DeadlinePickerDialog {
     private static final int INK = 0xFF17332B;
-    private static final int[] DATE_LABELS = {R.string.deadline_year, R.string.deadline_month, R.string.deadline_day};
+    private static final int ACCENT = 0xFF116654;
+    private static final int TIME_TEXT_SP = 44;
+    private static final DateTimeFormatter DATE =
+            DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.SIMPLIFIED_CHINESE);
     private final Activity activity;
     private final ZonedDateTime initial;
     private final LocalDate minimum;
     private LocalDate date;
-    private final Button[] dateButtons = new Button[3];
 
     DeadlinePickerDialog(Activity activity, ZonedDateTime initial, LocalDate minimum) {
         this.activity = activity;
@@ -41,114 +45,108 @@ final class DeadlinePickerDialog {
     void show(Consumer<Long> onChosen) {
         LinearLayout panel = new LinearLayout(activity);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(0xFFEAF0F3);
-        panel.setPadding(dp(14), dp(10), 0, dp(10));
+        panel.setPadding(dp(16), dp(8), dp(16), dp(4));
 
-        LinearLayout row = new LinearLayout(activity);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setLayoutDirection(LinearLayout.LAYOUT_DIRECTION_LTR);
-        LinearLayout dates = new LinearLayout(activity);
-        dates.setOrientation(LinearLayout.VERTICAL);
-        row.addView(dates, new LinearLayout.LayoutParams(dp(72), LinearLayout.LayoutParams.WRAP_CONTENT));
-        for (int i = 0; i < DATE_LABELS.length; i++) {
-            int part = i;
-            Button button = new Button(activity, null, android.R.attr.borderlessButtonStyle);
-            button.setAllCaps(false);
-            button.setGravity(Gravity.CENTER);
-            button.setTextColor(INK);
-            button.setTextSize(18);
-            button.setPadding(0, dp(4), 0, dp(4));
-            GradientDrawable surface = new GradientDrawable();
-            surface.setColor(0xFFF7FAFB);
-            surface.setCornerRadius(dp(14));
-            button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x25116654), surface, null));
-            button.setOnClickListener(view -> chooseDatePart(part));
-            LinearLayout.LayoutParams tile = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(54));
-            tile.topMargin = i == 0 ? 0 : dp(6);
-            dates.addView(button, tile);
-            dateButtons[i] = button;
-        }
-        showDate();
+        NumberPicker hours = wheel(23, initial.getHour(), R.string.deadline_hours);
+        NumberPicker minutes = wheel(59, initial.getMinute(), R.string.deadline_minutes);
+        LinearLayout time = new LinearLayout(activity);
+        time.setGravity(Gravity.CENTER);
+        time.addView(hours, new LinearLayout.LayoutParams(dp(88), dp(156)));
 
-        TimeDial dial = new TimeDial(activity, initial.getHour(), initial.getMinute());
-        LinearLayout.LayoutParams dialParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        dialParams.setMarginStart(dp(5));
-        row.addView(dial, dialParams);
-        panel.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        TextView separator = new TextView(activity);
+        separator.setText(":");
+        separator.setTextColor(INK);
+        separator.setTextSize(TIME_TEXT_SP);
+        separator.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        separator.setGravity(Gravity.CENTER);
+        separator.setImportantForAccessibility(TextView.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        time.addView(separator, new LinearLayout.LayoutParams(dp(28), dp(156)));
+        time.addView(minutes, new LinearLayout.LayoutParams(dp(88), dp(156)));
+        panel.addView(time, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView hint = new TextView(activity);
-        hint.setText(R.string.deadline_dial_hint);
-        hint.setTextSize(12);
-        hint.setTextColor(0xFF475D55);
-        hint.setGravity(Gravity.END);
-        hint.setPadding(0, dp(5), dp(16), 0);
-        panel.addView(hint, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout dateRow = new LinearLayout(activity);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+        dateRow.setPadding(dp(16), 0, dp(4), 0);
+        dateRow.setBackground(surface(0xFFF2F6F4, 14));
+        TextView dateLabel = new TextView(activity);
+        dateLabel.setText(DATE.format(date));
+        dateLabel.setTextColor(INK);
+        dateLabel.setTextSize(16);
+        dateLabel.setSingleLine(true);
+        dateRow.addView(dateLabel, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        ImageButton calendarButton = new ImageButton(activity);
+        TypedValue ripple = new TypedValue();
+        activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true);
+        calendarButton.setBackgroundResource(ripple.resourceId);
+        calendarButton.setImageResource(R.drawable.ic_nav_daily);
+        calendarButton.setImageTintList(ColorStateList.valueOf(ACCENT));
+        calendarButton.setContentDescription(activity.getString(R.string.deadline_calendar_open));
+        calendarButton.setOnClickListener(view -> chooseDate(dateLabel));
+        dateRow.addView(calendarButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        panel.addView(dateRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(panel);
         new AlertDialog.Builder(activity).setView(scroll)
                 .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    long chosen = date.atTime(dial.hour(), dial.minute())
-                            .atZone(initial.getZone()).toInstant().toEpochMilli();
-                    onChosen.accept(chosen);
-                })
+                .setPositiveButton(android.R.string.ok, (dialog, which) ->
+                        onChosen.accept(date.atTime(hours.getValue(), minutes.getValue())
+                                .atZone(initial.getZone()).toInstant().toEpochMilli()))
                 .show();
     }
 
-    private void showDate() {
-        int[] values = {date.getYear(), date.getMonthValue(), date.getDayOfMonth()};
-        for (int i = 0; i < values.length; i++) {
-            Button button = dateButtons[i];
-            String label = activity.getString(DATE_LABELS[i]);
-            String value = String.format(Locale.ROOT, i == 0 ? "%04d" : "%02d", values[i]);
-            SpannableString text = new SpannableString(label + "\n" + value);
-            text.setSpan(new RelativeSizeSpan(0.65f), 0, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            text.setSpan(new StyleSpan(Typeface.BOLD), label.length() + 1, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            button.setText(text);
-        }
-    }
-
-    private void chooseDatePart(int part) {
+    private NumberPicker wheel(int maximum, int value, int description) {
         NumberPicker picker = new NumberPicker(activity);
-        int start;
-        int end;
-        int value;
-        if (part == 0) {
-            start = minimum.getYear();
-            end = Math.max(2100, date.getYear());
-            value = date.getYear();
-        } else if (part == 1) {
-            start = date.getYear() == minimum.getYear() ? minimum.getMonthValue() : 1;
-            end = 12;
-            value = date.getMonthValue();
-        } else {
-            start = date.getYear() == minimum.getYear() && date.getMonth() == minimum.getMonth()
-                    ? minimum.getDayOfMonth() : 1;
-            end = date.lengthOfMonth();
-            value = date.getDayOfMonth();
-        }
-        picker.setMaxValue(end);
-        picker.setMinValue(start);
+        picker.setMinValue(0);
+        picker.setMaxValue(maximum);
+        picker.setFormatter(number -> number < 10 ? "0" + number : Integer.toString(number));
         picker.setValue(value);
-        picker.setWrapSelectorWheel(false);
+        picker.setWrapSelectorWheel(true);
         picker.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
-        new AlertDialog.Builder(activity).setTitle(DATE_LABELS[part]).setView(picker)
+        picker.setSelectionDividerHeight(0);
+        picker.setTextColor(INK);
+        picker.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, TIME_TEXT_SP,
+                activity.getResources().getDisplayMetrics()));
+        picker.setContentDescription(activity.getString(description));
+        return picker;
+    }
+
+    private void chooseDate(TextView dateLabel) {
+        CalendarView calendar = new CalendarView(activity);
+        calendar.setFirstDayOfWeek(Calendar.SUNDAY);
+        long selected = date.atStartOfDay(initial.getZone()).toInstant().toEpochMilli();
+        if (selected > calendar.getMaxDate()) calendar.setMaxDate(selected);
+        calendar.setMinDate(minimum.atStartOfDay(initial.getZone()).toInstant().toEpochMilli());
+        calendar.setDate(selected, false, false);
+        AtomicReference<LocalDate> pickedDate = new AtomicReference<>(date);
+        calendar.setOnDateChangeListener((view, year, month, day) ->
+                pickedDate.set(LocalDate.of(year, month + 1, day)));
+
+        ScrollView scroll = new ScrollView(activity);
+        scroll.setPadding(dp(8), dp(12), dp(8), 0);
+        scroll.addView(calendar);
+        AlertDialog dialog = new AlertDialog.Builder(activity).setView(scroll)
                 .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    int chosen = picker.getValue();
-                    LocalDate updated = switch (part) {
-                        case 0 -> date.withYear(chosen);
-                        case 1 -> date.withMonth(chosen);
-                        default -> date.withDayOfMonth(chosen);
-                    };
-                    date = updated.isBefore(minimum) ? minimum : updated;
-                    showDate();
+                .setPositiveButton(R.string.deadline_calendar_done, (window, which) -> {
+                    date = pickedDate.get();
+                    dateLabel.setText(DATE.format(date));
                 })
                 .show();
+        var window = dialog.getWindow();
+        window.setBackgroundDrawable(new InsetDrawable(surface(0xFFFFFFFF, 24), dp(12), 0, dp(12), dp(8)));
+        window.setGravity(Gravity.BOTTOM);
+        window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
+    private GradientDrawable surface(int color, int radius) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(dp(radius));
+        return shape;
     }
 
     private int dp(int value) {

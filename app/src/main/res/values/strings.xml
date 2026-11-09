@@ -12,19 +12,10 @@
     <string name="manual_deadline">设置截止时间（可选）</string>
     <string name="manual_deadline_clear">清除时间</string>
     <string name="manual_deadline_value">截止 %1$s</string>
-    <string name="deadline_year">年</string>
-    <string name="deadline_month">月</string>
-    <string name="deadline_day">日</string>
-    <string name="deadline_dial_hint">内圈调小时 · 外圈调分钟</string>
-    <string name="deadline_dial_value">时间 %1$s</string>
-    <string name="deadline_hour_up">增加一小时</string>
-    <string name="deadline_hour_down">减少一小时</string>
-    <string name="deadline_minute_up">增加一分钟</string>
-    <string name="deadline_minute_down">减少一分钟</string>
-    <item name="hour_up" type="id" />
-    <item name="hour_down" type="id" />
-    <item name="minute_up" type="id" />
-    <item name="minute_down" type="id" />
+    <string name="deadline_hours">小时</string>
+    <string name="deadline_minutes">分钟</string>
+    <string name="deadline_calendar_open">选择日期</string>
+    <string name="deadline_calendar_done">完成</string>
     <string name="manual_empty_error">请输入待办内容</string>
     <string name="manual_save">保存</string>
     <string name="manual_saved">已添加待办</string>
