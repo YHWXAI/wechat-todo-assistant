@@ -41,6 +41,16 @@ class TaskRulesCheck {
         }
     }
     public static void main(String[] args) {
+        test("大家不要忘了点点一键三连哦，感谢", false, false);
+        test("@所有人 大家记得点赞投币收藏哦！", false, false);
+        test("可以用这个改不？", false, false);
+        test("可以用这个改不", false, false);
+        test("能不能拿那个改一下？", false, false);
+        test("可以用这个模板改一下报价单吗？", true, true);
+        test("帮我用这个改一下", true, true);
+        test("明晚八点记得给这条视频点赞", true, true);
+        due("大家记得点赞，明早九点提交报表。", false, "2026-11-08T09:00");
+        due("可以用这个改不？明天九点发最终版。", true, "2026-11-08T09:00");
         for (String text : new String[] {
             "明天早上五点记得做早饭", "明天早上五点记得准备早饭", "明天，做早饭", "明天记得给猫添粮",
             "记得浇花", "记得复习一下英语", "别忘了吃药", "下班顺路取快递", "下班后顺手把快递拿回来",

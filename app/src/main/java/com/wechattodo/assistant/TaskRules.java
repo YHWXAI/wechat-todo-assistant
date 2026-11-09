@@ -261,6 +261,14 @@ final class TaskRules {
             + "|(?:拿到|收到|取到|弄好|办好)了?(?:以后|之后|后)?(?:我再?|就)?给你)");
     private static final Pattern LOCAL_OPINION = Pattern.compile("^(?:给我)?看看(?:这|那)(?:个)?(?:颜色|色号|色调)");
     private static final Pattern OPINION_QUESTION = Pattern.compile("^是不是(?:有点|太|很)?(?:偏|深|浅|灰|亮|暗)");
+    private static final Pattern ENGAGEMENT_PROMPT = Pattern.compile(
+            "^(?:给(?:我(?:们)?|主播|(?i:up主)|(?:这|那|本)(?:条|个|段)?(?:视频|作品|帖子|直播))\\s*)?"
+            + "(?:(?:点(?:点|一下|下|个)?\\s*)?(?:一键[三3]连|三连|赞)|点赞)"
+            + "(?:\\s*[、+]?\\s*(?:并|再|加|和)?(?:投币|收藏|关注))*"
+            + "(?:哦|喔|哟|呀|啊|哈|吧|呗|啦)?[。!?]*$");
+    private static final Pattern VAGUE_EDIT_QUESTION = Pattern.compile(
+            "^(?:用|拿)(?:这|那)(?:个|份|张|版|套|种)?(?:来)?(?:改|修改)(?:一下)?\\s*"
+            + "(?:[?]|(?:不改|不|吗|么|行不行|行吗|可以吗|可以不|可不可以)\\s*[?。!]?)$");
     private static final String HOUR = "(?:[0-9]{1,2}|[零〇一二两三四五六七八九十]{1,3})";
     private static final String CLOCK_OFFSET = "(?:一刻|半小时|" + HOUR + "分钟)";
     private static final Pattern TIME = Pattern.compile(
@@ -774,6 +782,10 @@ final class TaskRules {
                 || action.matches("^(?:看到了|知道了|了解了|看见了)(?:就行|就好|就可以)(?:了)?[。!]*$")) return false;
         boolean checkRequested = (requested || reminded) && CHECK_ACTION.matcher(action).find();
         boolean explicitRequest = reminded || (requested && EXPLICIT_REQUEST.matcher(request.group()).find());
+        if ((!timed && ENGAGEMENT_PROMPT.matcher(action).matches())
+                || (!explicitRequest && VAGUE_EDIT_QUESTION.matcher(action).matches())) {
+            return false;
+        }
         if ((STATUS_QUESTION.matcher(action).find() && !checkRequested)
                 || (!checkRequested && ALTERNATIVE_QUESTION.matcher(action).find())
                 || (QUESTION_END.matcher(action).find() && !requested && !checkRequested

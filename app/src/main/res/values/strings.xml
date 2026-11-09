@@ -52,7 +52,9 @@
     <string name="postpone_time_error">新截止时间须晚于当前时间和原截止时间</string>
     <string name="postpone_saved">已延期</string>
     <string name="task_card_complete">完成</string>
+    <dimen name="dialog_corner_radius">24dp</dimen>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:dialogCornerRadius">@dimen/dialog_corner_radius</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#116654</item>
         <item name="android:windowBackground">#F3F7F5</item>

@@ -118,6 +118,7 @@ final class ManualTaskDialog {
         label.setText(R.string.manual_category);
         add(fields, label, 12);
         Spinner categories = new Spinner(activity);
+        categories.setPopupBackgroundResource(R.drawable.dialog_surface);
         categories.setId(View.generateViewId());
         label.setLabelFor(categories.getId());
         String[] options = {activity.getString(R.string.manual_category_auto), activity.getString(R.string.daily_tasks),

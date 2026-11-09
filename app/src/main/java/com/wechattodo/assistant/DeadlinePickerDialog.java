@@ -6,10 +6,12 @@ import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.CalendarView;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.NumberPicker;
@@ -47,6 +49,38 @@ final class DeadlinePickerDialog {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(16), dp(8), dp(16), dp(4));
 
+        int calendarSize = dp(48);
+        int calendarMargin = dp(4);
+        FrameLayout dateRow = new FrameLayout(activity);
+        dateRow.setBackground(surface(0xFFF2F6F4, 14));
+        TextView dateLabel = new TextView(activity);
+        dateLabel.setText(DATE.format(date));
+        dateLabel.setTextColor(INK);
+        dateLabel.setTextSize(16);
+        dateLabel.setSingleLine(true);
+        dateLabel.setEllipsize(TextUtils.TruncateAt.END);
+        dateLabel.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams dateParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        int dateSideSpace = calendarSize + calendarMargin;
+        dateParams.setMargins(dateSideSpace, 0, dateSideSpace, 0);
+        dateRow.addView(dateLabel, dateParams);
+
+        ImageButton calendarButton = new ImageButton(activity);
+        TypedValue ripple = new TypedValue();
+        activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true);
+        calendarButton.setBackgroundResource(ripple.resourceId);
+        calendarButton.setImageResource(R.drawable.ic_nav_daily);
+        calendarButton.setImageTintList(ColorStateList.valueOf(ACCENT));
+        calendarButton.setContentDescription(activity.getString(R.string.deadline_calendar_open));
+        calendarButton.setOnClickListener(view -> chooseDate(dateLabel));
+        FrameLayout.LayoutParams calendarParams = new FrameLayout.LayoutParams(
+                calendarSize, calendarSize, Gravity.END | Gravity.CENTER_VERTICAL);
+        calendarParams.setMarginEnd(calendarMargin);
+        dateRow.addView(calendarButton, calendarParams);
+        panel.addView(dateRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         NumberPicker hours = wheel(23, initial.getHour(), R.string.deadline_hours);
         NumberPicker minutes = wheel(59, initial.getMinute(), R.string.deadline_minutes);
         LinearLayout time = new LinearLayout(activity);
@@ -62,32 +96,10 @@ final class DeadlinePickerDialog {
         separator.setImportantForAccessibility(TextView.IMPORTANT_FOR_ACCESSIBILITY_NO);
         time.addView(separator, new LinearLayout.LayoutParams(dp(28), dp(156)));
         time.addView(minutes, new LinearLayout.LayoutParams(dp(88), dp(156)));
-        panel.addView(time, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout dateRow = new LinearLayout(activity);
-        dateRow.setGravity(Gravity.CENTER_VERTICAL);
-        dateRow.setPadding(dp(16), 0, dp(4), 0);
-        dateRow.setBackground(surface(0xFFF2F6F4, 14));
-        TextView dateLabel = new TextView(activity);
-        dateLabel.setText(DATE.format(date));
-        dateLabel.setTextColor(INK);
-        dateLabel.setTextSize(16);
-        dateLabel.setSingleLine(true);
-        dateRow.addView(dateLabel, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        ImageButton calendarButton = new ImageButton(activity);
-        TypedValue ripple = new TypedValue();
-        activity.getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, ripple, true);
-        calendarButton.setBackgroundResource(ripple.resourceId);
-        calendarButton.setImageResource(R.drawable.ic_nav_daily);
-        calendarButton.setImageTintList(ColorStateList.valueOf(ACCENT));
-        calendarButton.setContentDescription(activity.getString(R.string.deadline_calendar_open));
-        calendarButton.setOnClickListener(view -> chooseDate(dateLabel));
-        dateRow.addView(calendarButton, new LinearLayout.LayoutParams(dp(48), dp(48)));
-        panel.addView(dateRow, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        timeParams.topMargin = dp(8);
+        panel.addView(time, timeParams);
 
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(panel);
@@ -137,7 +149,8 @@ final class DeadlinePickerDialog {
                 })
                 .show();
         var window = dialog.getWindow();
-        window.setBackgroundDrawable(new InsetDrawable(surface(0xFFFFFFFF, 24), dp(12), 0, dp(12), dp(8)));
+        window.setBackgroundDrawable(new InsetDrawable(
+                activity.getDrawable(R.drawable.dialog_surface), dp(12), 0, dp(12), dp(8)));
         window.setGravity(Gravity.BOTTOM);
         window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     }

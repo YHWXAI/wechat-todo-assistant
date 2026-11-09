@@ -39,6 +39,10 @@ final class MonitoringRulesCheck {
         Channel unconfiguredGroup = MonitoringRules.notification(CONFIGURED, "未配置的群", GROUP.title(), true);
         equal("未配置的群", unconfiguredGroup.title());
         equal(Context.GROUP, unconfiguredGroup.kind());
+        for (String text : List.of("大家不要忘了点点一键三连哦，感谢", "可以用这个改不？")) {
+            equal(Action.IGNORE, unconfiguredGroup.route(text).action());
+            equal(Action.IGNORE, privateNotification.route(text).action());
+        }
         equal(Action.CONFIRM, unconfiguredGroup.route(direct).action());
         equal(Action.AUTO, unconfiguredGroup.route("@所有人 明早九点开会").action());
         equal(Context.GROUP, MonitoringRules.notification(CONFIGURED, "", PRIVATE.title(), true).kind());
