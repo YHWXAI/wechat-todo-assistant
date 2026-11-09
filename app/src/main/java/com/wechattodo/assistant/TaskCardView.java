@@ -7,7 +7,11 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -16,43 +20,46 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import java.time.ZoneId;
+import java.util.regex.Pattern;
 
 final class TaskCardView extends LinearLayout {
-    enum Mode { STANDARD, COMPACT, EXPANDED }
+    enum Mode { COLLAPSED, EXPANDED }
 
     private static final int INK = 0xFF19372B;
     private static final int MUTED = 0xFF4A5940;
     private static final int OVERDUE = 0xFF913E28;
     private static final int ACTIVE = 0xFF225138;
+    private static final Pattern COUNTDOWN_NUMBERS = Pattern.compile("[0-9]+");
     private static final int[] CARD_COLORS = {
             0xFFF4E6D4, 0xFFDDEBE8, 0xFFEAE3F3, 0xFFF3EED3,
             0xFFDDE9F5, 0xFFF3E2E8, 0xFFE5EDD9, 0xFFEAE2DB,
             0xFFDCECF1, 0xFFF3DFDC, 0xFFE2E7F0, 0xFFEFEBE0
     };
     private final TaskStore.Task task;
-    private final GradientDrawable surface;
     private final FrameLayout iconTile;
     private final TextView preview;
     private final TextView body;
     private final TextView deadline;
     private final TextView countdown;
-    private final Button details;
+    private final LinearLayout schedule;
     private final TextView fullDeadline;
+    private final TextView expandedCountdown;
     private final LinearLayout actions;
     private Mode mode;
 
     TaskCardView(Context context, TaskStore.Task task, TaskCardSource source, Drawable applicationIcon,
-                 Mode mode, Runnable showDetails, Runnable complete, Runnable collapse) {
+                 Mode mode, Runnable delete, Runnable postpone, Runnable complete) {
         super(context);
         this.task = task;
         setOrientation(VERTICAL);
         // Use the stored ID so the color stays with the task when its position changes.
-        surface = rounded(CARD_COLORS[Math.floorMod(task.id() - 1, CARD_COLORS.length)], 22);
+        GradientDrawable surface = rounded(CARD_COLORS[Math.floorMod(task.id() - 1, CARD_COLORS.length)], 22);
         setBackground(new RippleDrawable(ColorStateList.valueOf(0x24225138), surface, null));
         setFocusable(true);
 
         LinearLayout header = new LinearLayout(context);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setLayoutDirection(LAYOUT_DIRECTION_LTR);
         addView(header, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         iconTile = new FrameLayout(context);
         iconTile.setBackground(rounded(0x88FFFFFF, 12));
@@ -86,10 +93,12 @@ final class TaskCardView extends LinearLayout {
         TextView sender = text(source.title(), 16, INK, true);
         sender.setSingleLine(true);
         sender.setEllipsize(TextUtils.TruncateAt.END);
+        sender.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
         copy.addView(sender);
         preview = text(task.body(), 13, MUTED, false);
         preview.setMaxLines(1);
         preview.setEllipsize(TextUtils.TruncateAt.END);
+        preview.setTextAlignment(TEXT_ALIGNMENT_VIEW_START);
         copy.addView(preview);
 
         LinearLayout times = column();
@@ -100,55 +109,61 @@ final class TaskCardView extends LinearLayout {
         deadline.setMaxLines(1);
         deadline.setEllipsize(TextUtils.TruncateAt.END);
         deadline.setMaxWidth(dp(128));
-        times.addView(deadline);
+        times.addView(deadline, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
         countdown = text("", 12, MUTED, false);
         countdown.setGravity(Gravity.END);
         countdown.setMaxLines(1);
         countdown.setEllipsize(TextUtils.TruncateAt.END);
         countdown.setMaxWidth(dp(128));
         addBelow(times, countdown, 2);
-        details = action(R.string.task_card_details, showDetails);
-        times.addView(details);
-
-        body = text(task.body(), 16, INK, false);
+        body = text(task.body(), 22, INK, false);
         if (task.done()) {
             preview.setPaintFlags(preview.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
             body.setPaintFlags(body.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
         }
         addBelow(this, body, 10);
+        schedule = new LinearLayout(context);
+        schedule.setGravity(Gravity.CENTER_VERTICAL);
         fullDeadline = text("", 14, MUTED, false);
-        addBelow(this, fullDeadline, 12);
+        LayoutParams deadlineParams = new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1);
+        deadlineParams.setMarginEnd(dp(8));
+        schedule.addView(fullDeadline, deadlineParams);
+        expandedCountdown = text("", 13, MUTED, false);
+        expandedCountdown.setGravity(Gravity.END);
+        expandedCountdown.setMaxWidth(dp(148));
+        schedule.addView(expandedCountdown, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+        LayoutParams scheduleParams = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        scheduleParams.topMargin = dp(12);
+        addView(schedule, scheduleParams);
 
         actions = new LinearLayout(context);
-        actions.setGravity(Gravity.END);
-        actions.addView(action(R.string.task_card_collapse, collapse));
-        if (!task.done()) actions.addView(action(R.string.task_card_complete, complete));
-        addView(actions, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+        addCardAction(R.string.task_card_delete, delete, OVERDUE, true, 0);
+        addCardAction(R.string.task_card_postpone, postpone, ACTIVE, !task.done(), 8);
+        addCardAction(R.string.task_card_complete, complete, ACTIVE, !task.done(), 8);
+        LayoutParams actionParams = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+        actionParams.topMargin = dp(8);
+        addView(actions, actionParams);
         setMode(mode);
     }
 
     void setMode(Mode mode) {
         if (this.mode == mode) return;
         this.mode = mode;
-        boolean compact = mode == Mode.COMPACT;
         boolean expanded = mode == Mode.EXPANDED;
         int horizontal = dp(expanded ? 18 : 12);
-        int vertical = dp(compact ? 6 : expanded ? 16 : 12);
+        int vertical = dp(expanded ? 16 : 8);
         setPadding(horizontal, vertical, horizontal, vertical);
-        setMinimumHeight(dp(compact ? 52 : expanded ? 152 : 96));
-        surface.setCornerRadius(dp(compact ? 16 : 22));
+        setMinimumHeight(dp(expanded ? 152 : 79));
         setSelected(expanded);
+        setGravity(expanded ? Gravity.TOP : Gravity.CENTER_VERTICAL);
         var iconParams = iconTile.getLayoutParams();
-        iconParams.width = iconParams.height = dp(compact ? 30 : 42);
+        iconParams.width = iconParams.height = dp(expanded ? 42 : 30);
         iconTile.setLayoutParams(iconParams);
-        preview.setVisibility(compact ? VISIBLE : GONE);
-        body.setVisibility(compact ? GONE : VISIBLE);
-        body.setTextSize(expanded ? 22 : 16);
-        body.setMaxLines(expanded ? Integer.MAX_VALUE : 2);
-        body.setEllipsize(expanded ? null : TextUtils.TruncateAt.END);
+        preview.setVisibility(expanded ? GONE : VISIBLE);
+        body.setVisibility(expanded ? VISIBLE : GONE);
         deadline.setVisibility(expanded ? GONE : VISIBLE);
-        details.setVisibility(expanded ? VISIBLE : GONE);
-        fullDeadline.setVisibility(expanded ? VISIBLE : GONE);
+        countdown.setVisibility(expanded ? GONE : VISIBLE);
+        schedule.setVisibility(expanded ? VISIBLE : GONE);
         actions.setVisibility(expanded ? VISIBLE : GONE);
         refreshTime(System.currentTimeMillis());
     }
@@ -161,10 +176,38 @@ final class TaskCardView extends LinearLayout {
         String remaining = task.done() ? "已完成" : due == null ? "—" : TaskTime.remaining(due, now);
         TextView dateLabel = expanded ? fullDeadline : deadline;
         if (!TextUtils.equals(dateLabel.getText(), date)) dateLabel.setText(date);
-        if (!TextUtils.equals(countdown.getText(), remaining)) countdown.setText(remaining);
+        TextView remainingLabel = expanded ? expandedCountdown : countdown;
+        if (!TextUtils.equals(remainingLabel.getText(), remaining)) {
+            remainingLabel.setText(expanded ? emphasizeNumbers(remaining) : remaining);
+        }
         int color = task.done() || due == null ? MUTED : due <= now ? OVERDUE : ACTIVE;
-        if (countdown.getCurrentTextColor() != color) countdown.setTextColor(color);
+        if (remainingLabel.getCurrentTextColor() != color) remainingLabel.setTextColor(color);
         return task.done() || due == null ? Long.MAX_VALUE : TaskTime.nextChange(due, now);
+    }
+
+    private static CharSequence emphasizeNumbers(String remaining) {
+        var numbers = COUNTDOWN_NUMBERS.matcher(remaining);
+        if (!numbers.find()) return remaining;
+        SpannableString text = new SpannableString(remaining);
+        do {
+            text.setSpan(new RelativeSizeSpan(1.8f), numbers.start(), numbers.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            text.setSpan(new StyleSpan(Typeface.BOLD), numbers.start(), numbers.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        } while (numbers.find());
+        return text;
+    }
+
+    private void addCardAction(int label, Runnable listener, int color, boolean enabled, int spacing) {
+        Button button = action(label, listener);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(0, 0, 0, 0);
+        button.setTextColor(color);
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x24225138), rounded(0x66FFFFFF, 10), null));
+        button.setEnabled(enabled);
+        if (!enabled) button.setAlpha(0.45f);
+        LayoutParams params = new LayoutParams(0, dp(48), 1);
+        params.setMarginStart(dp(spacing));
+        actions.addView(button, params);
     }
 
     private LinearLayout column() {

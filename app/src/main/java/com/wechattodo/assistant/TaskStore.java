@@ -225,6 +225,14 @@ final class TaskStore extends SQLiteOpenHelper {
         getWritableDatabase().delete("tasks", "_id = ?", args(id));
     }
 
+    boolean postpone(long id, long due) {
+        ContentValues values = new ContentValues();
+        values.put("due", due);
+        values.put("reminded", 0);
+        return getWritableDatabase().update("tasks", values, "_id = ? AND done = 0 AND (due IS NULL OR due < ?)",
+                new String[]{Long.toString(id), Long.toString(due)}) == 1;
+    }
+
     boolean edit(long id, String body, Long due) {
         String text = body.strip();
         if (text.isEmpty()) throw new IllegalArgumentException("Empty task");

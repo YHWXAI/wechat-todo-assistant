@@ -8,6 +8,8 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.provider.Settings;
 
 public final class Reminders extends BroadcastReceiver {
     static final String CHANNEL = "task_due";
@@ -16,7 +18,8 @@ public final class Reminders extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
-        if (Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
+        if (Intent.ACTION_BOOT_COMPLETED.equals(action) || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)
+                || AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED.equals(action)) {
             scheduleNext(context);
             return;
         }
@@ -42,9 +45,17 @@ public final class Reminders extends BroadcastReceiver {
         TaskStore.Task next = TaskStore.get(context).nextReminder();
         if (next == null || !canNotify(context)) {
             alarms.cancel(pending);
-        } else {
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.due(), pending);
+            return;
         }
+        if (alarms.canScheduleExactAlarms()) {
+            try {
+                alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.due(), pending);
+                return;
+            } catch (SecurityException revoked) {
+                // Access can change after canScheduleExactAlarms().
+            }
+        }
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next.due(), pending);
     }
 
     static boolean canNotify(Context context) {
@@ -53,6 +64,10 @@ public final class Reminders extends BroadcastReceiver {
         if (channel == null) {
             channel = new NotificationChannel(CHANNEL, "待办到期提醒", NotificationManager.IMPORTANCE_HIGH);
             channel.setDescription("在微信待办到期时提醒");
+            channel.setSound(Settings.System.DEFAULT_NOTIFICATION_URI, new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build());
             manager.createNotificationChannel(channel);
         }
         return manager.areNotificationsEnabled() && channel.getImportance() != NotificationManager.IMPORTANCE_NONE;

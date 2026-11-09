@@ -30,6 +30,9 @@
     <string name="clipboard_add">确认待办内容</string>
     <string name="clipboard_save">确认添加</string>
     <string name="permission_status">通知读取 %1$s  ·  到期提醒 %2$s</string>
+    <string name="enable_reminder">开启到期提醒</string>
+    <string name="reminder_sound_settings">设置提醒铃声</string>
+    <string name="enable_exact_reminder">允许准时提醒</string>
     <string name="enabled">已开启</string>
     <string name="disabled">未开启</string>
     <string name="open_task_count">我的待办  ·  %1$d 项未完成</string>
@@ -40,9 +43,11 @@
     <string name="daily_tasks">日常待办</string>
     <string name="work_tasks">工作待办</string>
     <string name="empty_tasks">暂无待办</string>
-    <string name="task_card_collapse">收起</string>
+    <string name="task_card_delete">删除</string>
+    <string name="task_card_postpone">延期</string>
+    <string name="postpone_time_error">新截止时间须晚于当前时间和原截止时间</string>
+    <string name="postpone_saved">已延期</string>
     <string name="task_card_complete">完成</string>
-    <string name="task_card_details">查看全文</string>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#116654</item>

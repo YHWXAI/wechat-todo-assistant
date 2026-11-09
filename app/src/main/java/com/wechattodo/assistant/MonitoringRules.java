@@ -8,7 +8,8 @@ import java.util.regex.Pattern;
 final class MonitoringRules {
     enum App {
         WECHAT("微信", "com.tencent.mm"), WECOM("企业微信", "com.tencent.wework"),
-        QQ("QQ", "com.tencent.mobileqq"), DINGTALK("钉钉", "com.alibaba.android.rimet"),
+        QQ("QQ", "com.tencent.mobileqq"), TIM("TIM", "com.tencent.tim"),
+        DINGTALK("钉钉", "com.alibaba.android.rimet"),
         FEISHU("飞书", "com.ss.android.lark"), TELEGRAM("Telegram", "org.telegram.messenger"),
         WHATSAPP("WhatsApp", "com.whatsapp");
 

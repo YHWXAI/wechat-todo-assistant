@@ -16,6 +16,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -43,6 +44,20 @@ final class ManualTaskDialog {
 
     void edit(TaskStore.Task task, Consumer<Entry> onSave) {
         showForm(task.body(), task.due(), task.manualCategory(), true, R.string.edit_task, R.string.manual_save, onSave);
+    }
+
+    void postpone(Long currentDeadline, Consumer<Long> onSave) {
+        ZonedDateTime now = ZonedDateTime.now();
+        long earliest = Math.max(now.toInstant().toEpochMilli(), currentDeadline == null ? 0 : currentDeadline);
+        ZonedDateTime minimum = Instant.ofEpochMilli(earliest).atZone(now.getZone());
+        ZonedDateTime initial = minimum.plusHours(1).withSecond(0).withNano(0);
+        pickDeadline(initial, minimum.toLocalDate(), chosen -> {
+            if (chosen > Math.max(earliest, System.currentTimeMillis())) {
+                onSave.accept(chosen);
+            } else {
+                Toast.makeText(activity, R.string.postpone_time_error, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void showForm(String body, Long deadlineAt, TaskCategory preferred, boolean editing, int title,
@@ -129,15 +144,21 @@ final class ManualTaskDialog {
         ZonedDateTime existing = due == null ? now.plusHours(1).withSecond(0).withNano(0)
                 : Instant.ofEpochMilli(due).atZone(now.getZone());
         ZonedDateTime initial = existing.toLocalDate().isBefore(now.toLocalDate()) ? now.plusHours(1) : existing;
+        pickDeadline(initial, now.toLocalDate(), chosen -> {
+            due = chosen;
+            showDeadline(deadline, clear);
+        });
+    }
+
+    private void pickDeadline(ZonedDateTime initial, LocalDate minimum, Consumer<Long> onChosen) {
         DatePickerDialog date = new DatePickerDialog(activity, (picker, year, month, day) -> {
             LocalDate selected = LocalDate.of(year, month + 1, day);
             new TimePickerDialog(activity, (time, hour, minute) -> {
-                ZonedDateTime chosen = selected.atTime(hour, minute).atZone(now.getZone());
-                due = chosen.toInstant().toEpochMilli();
-                showDeadline(deadline, clear);
+                ZonedDateTime chosen = selected.atTime(hour, minute).atZone(initial.getZone());
+                onChosen.accept(chosen.toInstant().toEpochMilli());
             }, initial.getHour(), initial.getMinute(), true).show();
         }, initial.getYear(), initial.getMonthValue() - 1, initial.getDayOfMonth());
-        date.getDatePicker().setMinDate(now.toLocalDate().atStartOfDay(now.getZone()).toInstant().toEpochMilli());
+        date.getDatePicker().setMinDate(minimum.atStartOfDay(initial.getZone()).toInstant().toEpochMilli());
         date.show();
     }
 

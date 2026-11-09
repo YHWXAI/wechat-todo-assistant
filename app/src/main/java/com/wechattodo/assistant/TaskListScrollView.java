@@ -1,22 +1,48 @@
 package com.wechattodo.assistant;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.Rect;
 import android.view.MotionEvent;
+import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewTreeObserver;
 import android.widget.ScrollView;
 
 final class TaskListScrollView extends ScrollView {
     private final int touchSlop;
-    private final Runnable onSwipeUp;
+    private final Runnable onVerticalSwipe;
     private float startX;
     private float startY;
     private boolean tracking;
-    private boolean swipeUp;
+    private boolean verticalSwipe;
 
-    TaskListScrollView(Context context, Runnable onSwipeUp) {
+    TaskListScrollView(Context context, Runnable onVerticalSwipe) {
         super(context);
         touchSlop = ViewConfiguration.get(context).getScaledTouchSlop();
-        this.onSwipeUp = onSwipeUp;
+        this.onVerticalSwipe = onVerticalSwipe;
+    }
+
+    void revealAfterLayout(View card) {
+        getViewTreeObserver().addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
+            @Override
+            public boolean onPreDraw() {
+                getViewTreeObserver().removeOnPreDrawListener(this);
+                if (!card.isSelected() || !card.isShown() || !card.isAttachedToWindow()) return true;
+
+                Rect bounds = new Rect(0, 0, card.getWidth(), card.getHeight());
+                offsetDescendantRectToMyCoords(card, bounds);
+                int top = getScrollY() + getPaddingTop();
+                int bottom = getScrollY() + getHeight() - getPaddingBottom();
+                int delta = bounds.top < top || bounds.height() > bottom - top
+                        ? bounds.top - top : Math.max(0, bounds.bottom - bottom);
+                if (delta != 0) {
+                    if (ValueAnimator.areAnimatorsEnabled()) smoothScrollBy(0, delta);
+                    else scrollBy(0, delta);
+                }
+                return true;
+            }
+        });
     }
 
     @Override
@@ -28,18 +54,18 @@ final class TaskListScrollView extends ScrollView {
                 tracking = true;
             }
             case MotionEvent.ACTION_MOVE -> {
-                float rise = startY - event.getY();
-                if (tracking && rise > touchSlop && rise > Math.abs(event.getX() - startX)) {
+                float verticalDistance = Math.abs(event.getY() - startY);
+                if (tracking && verticalDistance > touchSlop && verticalDistance > Math.abs(event.getX() - startX)) {
                     tracking = false;
-                    swipeUp = true;
+                    verticalSwipe = true;
                 }
             }
             case MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> tracking = false;
         }
         boolean handled = super.dispatchTouchEvent(event);
-        if (swipeUp) {
-            swipeUp = false;
-            onSwipeUp.run();
+        if (verticalSwipe) {
+            verticalSwipe = false;
+            onVerticalSwipe.run();
         }
         return handled;
     }
@@ -47,6 +73,6 @@ final class TaskListScrollView extends ScrollView {
     @Override
     public boolean onInterceptTouchEvent(MotionEvent event) {
         // Consume the swipe even if the list is too short to scroll, so it cannot become a card tap.
-        return super.onInterceptTouchEvent(event) || swipeUp;
+        return super.onInterceptTouchEvent(event) || verticalSwipe;
     }
 }
